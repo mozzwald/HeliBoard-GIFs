@@ -194,6 +194,8 @@ public final class EmojiPalettesView extends LinearLayout
     private KeyboardActionListener mKeyboardActionListener = KeyboardActionListener.EMPTY_LISTENER;
     private final EmojiCategory mEmojiCategory;
     private ViewPager2 mPager;
+    private View mGifSearchView;
+    private ImageView mGifTab;
 
     public EmojiPalettesView(final Context context, final AttributeSet attrs) {
         this(context, attrs, R.attr.emojiPalettesViewStyle);
@@ -251,10 +253,23 @@ public final class EmojiPalettesView extends LinearLayout
             for (final EmojiCategory.CategoryProperties properties : mEmojiCategory.getShownCategories()) {
                 addTab(mTabStrip, properties.mCategoryId);
             }
+            // Add GIF tab after emoji categories
+            mGifTab = new ImageView(getContext());
+            mColors.setBackground(mGifTab, ColorType.STRIP_BACKGROUND);
+            mColors.setColor(mGifTab, ColorType.EMOJI_CATEGORY);
+            mGifTab.setScaleType(ImageView.ScaleType.CENTER);
+            mGifTab.setImageResource(R.drawable.ic_emoji_gif);
+            mGifTab.setContentDescription(getContext().getString(R.string.spoken_description_emoji_category_gif));
+            mGifTab.setTag("GIF");
+            mTabStrip.addView(mGifTab);
+            mGifTab.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f));
+            mGifTab.setOnClickListener(this);
         }
 
         mPager = findViewById(R.id.emoji_pager);
         mPager.setAdapter(new PagerAdapter(mPager));
+        // initialize GIF search view
+        mGifSearchView = findViewById(R.id.gif_search_view);
         mEmojiLayoutParams.setEmojiListProperties(mPager);
         mEmojiCategoryPageIndicatorView = findViewById(R.id.emoji_category_page_id_view);
         mEmojiLayoutParams.setCategoryPageIdViewProperties(mEmojiCategoryPageIndicatorView);
@@ -271,8 +286,42 @@ public final class EmojiPalettesView extends LinearLayout
     @Override
     public void onClick(View v) {
         final Object tag = v.getTag();
-        if (tag instanceof Long) {
+        // GIF tab selected
+        if (tag instanceof String && "GIF".equals(tag)) {
             AudioAndHapticFeedbackManager.getInstance().performHapticAndAudioFeedback(KeyCode.NOT_SPECIFIED, this);
+            if (mGifTab != null) {
+                mColors.setColor(mGifTab, ColorType.EMOJI_CATEGORY_SELECTED);
+            }
+            for (EmojiCategory.CategoryProperties props : mEmojiCategory.getShownCategories()) {
+                View tab = mTabStrip.findViewWithTag((long) props.mCategoryId);
+                if (tab instanceof ImageView) {
+                    mColors.setColor((ImageView) tab, ColorType.EMOJI_CATEGORY);
+                }
+            }
+            if (mPager != null) {
+                mPager.setVisibility(View.GONE);
+            }
+            if (mEmojiCategoryPageIndicatorView != null) {
+                mEmojiCategoryPageIndicatorView.setVisibility(View.GONE);
+            }
+            if (mGifSearchView != null) {
+                mGifSearchView.setVisibility(View.VISIBLE);
+            }
+        // Emoji tab selected
+        } else if (tag instanceof Long) {
+            AudioAndHapticFeedbackManager.getInstance().performHapticAndAudioFeedback(KeyCode.NOT_SPECIFIED, this);
+            if (mGifTab != null) {
+                mColors.setColor(mGifTab, ColorType.EMOJI_CATEGORY);
+            }
+            if (mGifSearchView != null) {
+                mGifSearchView.setVisibility(View.GONE);
+            }
+            if (mPager != null) {
+                mPager.setVisibility(View.VISIBLE);
+            }
+            if (mEmojiCategoryPageIndicatorView != null) {
+                mEmojiCategoryPageIndicatorView.setVisibility(View.VISIBLE);
+            }
             final int categoryId = ((Long) tag).intValue();
             if (categoryId != mEmojiCategory.getCurrentCategoryId()) {
                 setCurrentCategoryId(categoryId, false);

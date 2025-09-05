@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Placeholder emoji+GIF icon; replace with actual design -->
+<bitmap xmlns:android="http://schemas.android.com/apk/res/android"
+    android:src="@drawable/sym_keyboard_smiley_holo"
+    android:gravity="center" />

@@ -5,6 +5,9 @@ plugins {
     kotlin("plugin.compose") version "2.0.0"
 }
 
+// TENOR API key: retrieve from project property or empty if undefined
+val tenorKey: String = project.findProperty("TENOR_API_KEY") as? String ?: ""
+
 android {
     compileSdk = 35
 
@@ -19,6 +22,7 @@ android {
             abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64"))
         }
         proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+        buildConfigField("String", "TENOR_API_KEY", "\"$tenorKey\"")
     }
 
     buildTypes {
