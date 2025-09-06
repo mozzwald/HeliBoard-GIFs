@@ -71,6 +71,15 @@ public class GifSearchView extends LinearLayout {
     private GifActionsListener actionsListener;
     private GridLayoutManager layoutManager;
     private RequestManager glide;
+    private ImageButton clearButton;
+    // Helpers for editing state
+    public boolean hasResults() {
+        return adapter != null && adapter.getItemCount() > 0;
+    }
+    public int getQueryLength() {
+        if (queryField == null || queryField.getText() == null) return 0;
+        return queryField.getText().length();
+    }
     private int spanCount = 2; // will be recalculated at runtime
 
     public GifSearchView(Context context, AttributeSet attrs) {
@@ -82,7 +91,24 @@ public class GifSearchView extends LinearLayout {
         setFocusableInTouchMode(false);
         setDescendantFocusability(FOCUS_AFTER_DESCENDANTS);
         queryField = findViewById(R.id.gif_query_field);
+        // Notify editing state when query changes
+        queryField.addTextChangedListener(new android.text.TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
+            @Override public void afterTextChanged(android.text.Editable s) {
+                boolean wantsKeys = (s == null || s.length() == 0) || !hasResults();
+                if (actionsListener != null) actionsListener.onGifEditingStateChanged(wantsKeys);
+                // Show or hide clear button
+                if (clearButton != null) {
+                    clearButton.setVisibility(s != null && s.length() > 0 ? View.VISIBLE : View.GONE);
+                }
+            }
+        });
         searchButton = findViewById(R.id.btn_search_gif);
+        // Clear button
+        clearButton = findViewById(R.id.btn_clear_gif);
+        clearButton.setVisibility(View.GONE);
+        clearButton.setOnClickListener(v -> resetGifUi());
         // Ensure search button is clickable and has a background for hit-testing
         searchButton.setClickable(true);
         searchButton.setFocusable(false);
@@ -204,12 +230,21 @@ public class GifSearchView extends LinearLayout {
         void onGifInsertCompleted();
         /** Called when GIF search results are visible (non-empty). */
         void onGifResultsVisible();
+        /**
+         * Called when the editing state changes: wantsKeysVisible=true if the user should see
+         * letter keys (editing or no results), false when browsing results.
+         */
+        void onGifEditingStateChanged(boolean wantsKeysVisible);
     }
     /**
      * Set listener for GIF insertion completion.
      */
     public void setActionsListener(GifActionsListener l) {
         this.actionsListener = l;
+        // Initial editing state: no results, so keys visible
+        if (actionsListener != null) {
+            actionsListener.onGifEditingStateChanged(true);
+        }
     }
     /**
      * Reset the GIF UI: clear query and results.
@@ -223,6 +258,8 @@ public class GifSearchView extends LinearLayout {
                 adapter.notifyDataSetChanged();
             }
             if (grid != null) grid.scrollToPosition(0);
+            // After reset, editing state: show keys
+            if (actionsListener != null) actionsListener.onGifEditingStateChanged(true);
         } catch (Throwable t) {
             Log.w(TAG, "resetGifUi: " + t);
         }
@@ -295,9 +332,13 @@ public class GifSearchView extends LinearLayout {
         @Override
         protected void onPostExecute(List<GifItem> items) {
             adapter.setItems(items);
-            // Notify listener that results are visible if non-empty
-            if (actionsListener != null && items != null && !items.isEmpty()) {
-                actionsListener.onGifResultsVisible();
+            boolean has = items != null && !items.isEmpty();
+            if (actionsListener != null) {
+                if (has) {
+                    actionsListener.onGifResultsVisible();
+                }
+                // browsing if results exist: hide keys; else editing: show keys
+                actionsListener.onGifEditingStateChanged(!has);
             }
         }
     }

@@ -29,6 +29,7 @@ import android.util.Printer;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.ViewGroup.LayoutParams;
 import android.view.Window;
 import android.view.WindowManager;
@@ -879,10 +880,17 @@ public class LatinIME extends InputMethodService implements
         if (gifSearchView != null) {
             gifSearchView.setActionsListener(new GifSearchView.GifActionsListener() {
                 @Override public void onGifInsertCompleted() {
-                    showKeyboardNormal();
+                    // Return to keys after insert
+                    setUiMode(UiMode.KEYS);
                 }
                 @Override public void onGifResultsVisible() {
-                    showGifResultsFullHeight();
+                    // Enter GIF mode when results appear
+                    setUiMode(UiMode.GIF);
+                }
+                @Override public void onGifEditingStateChanged(boolean wantsKeysVisible) {
+                    // Show or hide keys while in GIF mode
+                    gifWantsKeysVisible = wantsKeysVisible;
+                    if (uiMode == UiMode.GIF) applyUiMode();
                 }
             });
         }
@@ -896,12 +904,19 @@ public class LatinIME extends InputMethodService implements
     @Override
     public void onStartInput(final EditorInfo editorInfo, final boolean restarting) {
         mHandler.onStartInput(editorInfo, restarting);
+        // Reset UI mode and editing state on starting input
+        uiMode = UiMode.KEYS;
+        gifWantsKeysVisible = true;
     }
 
     @Override
     public void onStartInputView(final EditorInfo editorInfo, final boolean restarting) {
         mHandler.onStartInputView(editorInfo, restarting);
         mStatsUtilsManager.onStartInputView();
+        // Reset to default key mode and editing state on showing input
+        uiMode = UiMode.KEYS;
+        gifWantsKeysVisible = true;
+        applyUiMode();
     }
 
     @Override
@@ -915,6 +930,10 @@ public class LatinIME extends InputMethodService implements
     @Override
     public void onFinishInput() {
         mHandler.onFinishInput();
+        // Collapse panels and reset editing state when input finishes
+        uiMode = UiMode.KEYS;
+        gifWantsKeysVisible = true;
+        applyUiMode();
     }
 
     @Override
@@ -1340,6 +1359,57 @@ public class LatinIME extends InputMethodService implements
         }
         if (keys != null) {
             keys.setVisibility(View.VISIBLE);
+        }
+        View root = getWindow().getWindow().getDecorView();
+        if (root != null) root.requestLayout();
+    }
+
+    /**
+     * Apply the current UI mode, syncing panel, keyboard, and toolbars.
+     */
+    public void applyUiMode() {
+        if (mInputView == null) return;
+        View suggestionStrip = mInputView.findViewById(R.id.suggestion_strip_view);
+        View emojiTabStrip    = mInputView.findViewById(R.id.emoji_tab_strip);
+        View gifSearchView    = mInputView.findViewById(R.id.gif_search_view);
+        View mainKeyboard     = mInputView.findViewById(R.id.keyboard_view);
+        View emojiPalettes    = mInputView.findViewById(R.id.emoji_palettes_view);
+        switch (uiMode) {
+            case KEYS:
+                if (gifSearchView != null) gifSearchView.setVisibility(View.GONE);
+                if (emojiPalettes != null) emojiPalettes.setVisibility(View.GONE);
+                if (mainKeyboard != null) mainKeyboard.setVisibility(View.VISIBLE);
+                if (suggestionStrip != null) suggestionStrip.setVisibility(View.VISIBLE);
+                if (emojiTabStrip != null) emojiTabStrip.setVisibility(View.GONE);
+                break;
+            case EMOJI:
+                if (gifSearchView != null) gifSearchView.setVisibility(View.GONE);
+                if (emojiPalettes != null) emojiPalettes.setVisibility(View.VISIBLE);
+                if (mainKeyboard != null) mainKeyboard.setVisibility(View.GONE);
+                if (suggestionStrip != null) suggestionStrip.setVisibility(View.GONE);
+                if (emojiTabStrip != null) emojiTabStrip.setVisibility(View.VISIBLE);
+                break;
+            case GIF:
+                if (gifSearchView != null) {
+                    // Adjust panel height: wrap for editing, expand for browsing
+                    View root = getWindow().getWindow().getDecorView();
+                    int totalH = root != null ? root.getHeight() : mInputView.getHeight();
+                    int stripH = (suggestionStrip != null && suggestionStrip.getVisibility() == View.VISIBLE)
+                            ? suggestionStrip.getHeight() : 0;
+                    ViewGroup.LayoutParams lp = gifSearchView.getLayoutParams();
+                    if (!gifWantsKeysVisible) {
+                        lp.height = totalH - stripH;
+                    } else {
+                        lp.height = LayoutParams.WRAP_CONTENT;
+                    }
+                    gifSearchView.setLayoutParams(lp);
+                    gifSearchView.setVisibility(View.VISIBLE);
+                }
+                if (emojiPalettes != null) emojiPalettes.setVisibility(View.GONE);
+                if (mainKeyboard != null) mainKeyboard.setVisibility(gifWantsKeysVisible ? View.VISIBLE : View.GONE);
+                if (suggestionStrip != null) suggestionStrip.setVisibility(View.GONE);
+                if (emojiTabStrip != null) emojiTabStrip.setVisibility(View.VISIBLE);
+                break;
         }
         View root = getWindow().getWindow().getDecorView();
         if (root != null) root.requestLayout();
@@ -1884,6 +1954,20 @@ public class LatinIME extends InputMethodService implements
 
     public ClipboardHistoryManager getClipboardHistoryManager() {
         return mClipboardHistoryManager;
+    }
+    /**
+     * IME UI modes for unified panel/toolbar state.
+     */
+    public enum UiMode { KEYS, EMOJI, GIF }
+    private UiMode uiMode = UiMode.KEYS;
+    // When in GIF mode, whether letter keys should remain visible (editing) or hidden (browsing)
+    private boolean gifWantsKeysVisible = true;
+    /**
+     * Change UI mode and immediately apply it.
+     */
+    public void setUiMode(UiMode mode) {
+        uiMode = mode;
+        applyUiMode();
     }
 
     void launchSettings() {

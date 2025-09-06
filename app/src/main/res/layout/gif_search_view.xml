@@ -26,6 +26,15 @@
             android:cursorVisible="false"
             android:textColor="@color/gif_search_text"
             android:textColorHint="@color/gif_search_hint" />
+        <!-- Clear text button -->
+        <ImageButton
+            android:id="@+id/btn_clear_gif"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:src="@android:drawable/ic_menu_close_clear_cancel"
+            android:contentDescription="@string/clear_text"
+            android:visibility="gone"
+            android:background="@android:drawable/btn_default" />
 
         <ImageButton
             android:id="@+id/btn_search_gif"

@@ -48,6 +48,9 @@ import helium314.keyboard.latin.common.ColorType;
 import helium314.keyboard.latin.common.Colors;
 import helium314.keyboard.latin.settings.Settings;
 import helium314.keyboard.latin.settings.SettingsValues;
+import android.content.ContextWrapper;
+import android.inputmethodservice.InputMethodService;
+import helium314.keyboard.latin.LatinIME;
 import helium314.keyboard.latin.utils.DictionaryInfoUtils;
 import helium314.keyboard.latin.utils.ResourceUtils;
 
@@ -296,7 +299,21 @@ public final class EmojiPalettesView extends LinearLayout
     @Override
     public void onClick(View v) {
         final Object tag = v.getTag();
-        // GIF tab selected
+        // Obtain IME service to apply unified UI mode
+        InputMethodService ims = null;
+        ContextWrapper cw = (ContextWrapper) getContext();
+        int guard = 0;
+        while (cw != null && guard < 10) {
+            if (cw instanceof InputMethodService) {
+                ims = (InputMethodService) cw;
+                break;
+            }
+            cw = (ContextWrapper) cw.getBaseContext();
+            guard++;
+        }
+        if (!(ims instanceof LatinIME)) return;
+        LatinIME ime = (LatinIME) ims;
+        // Update tab colors
         if (tag instanceof String && "GIF".equals(tag)) {
             AudioAndHapticFeedbackManager.getInstance().performHapticAndAudioFeedback(KeyCode.NOT_SPECIFIED, this);
             if (mGifTab != null) {
@@ -308,40 +325,25 @@ public final class EmojiPalettesView extends LinearLayout
                     mColors.setColor((ImageView) tab, ColorType.EMOJI_CATEGORY);
                 }
             }
-            // Hide emoji pages and page indicator
-            if (mPager != null) mPager.setVisibility(View.GONE);
-            if (mEmojiCategoryPageIndicatorView != null) mEmojiCategoryPageIndicatorView.setVisibility(View.GONE);
-            // Show GIF search view
-            if (mGifSearchView != null) mGifSearchView.setVisibility(View.VISIBLE);
-            // Ensure main keyboard keys remain visible for search input
-            MainKeyboardView mkv = KeyboardSwitcher.getInstance().getMainKeyboardView();
-            if (mkv != null) mkv.setVisibility(View.VISIBLE);
-            // Hide emoji palette pages
-            this.setVisibility(View.GONE);
-            requestLayout();
-        // Emoji tab selected
+            // Enter GIF mode
+            ime.setUiMode(LatinIME.UiMode.GIF);
         } else if (tag instanceof Long) {
             AudioAndHapticFeedbackManager.getInstance().performHapticAndAudioFeedback(KeyCode.NOT_SPECIFIED, this);
             if (mGifTab != null) {
                 mColors.setColor(mGifTab, ColorType.EMOJI_CATEGORY);
             }
-            // Hide GIF search view
-            if (mGifSearchView != null) mGifSearchView.setVisibility(View.GONE);
-            // Show emoji pages and page indicator
-            if (mPager != null) mPager.setVisibility(View.VISIBLE);
-            if (mEmojiCategoryPageIndicatorView != null) mEmojiCategoryPageIndicatorView.setVisibility(View.VISIBLE);
-            // Show emoji palette pages
-            this.setVisibility(View.VISIBLE);
-            // Hide main keyboard keys when showing emoji pages
-            MainKeyboardView mkv2 = KeyboardSwitcher.getInstance().getMainKeyboardView();
-            if (mkv2 != null) mkv2.setVisibility(View.GONE);
-            requestLayout();
+            // Enter Emoji mode
+            ime.setUiMode(LatinIME.UiMode.EMOJI);
+            // Update selected emoji category if changed
             final int categoryId = ((Long) tag).intValue();
             if (categoryId != mEmojiCategory.getCurrentCategoryId()) {
                 setCurrentCategoryId(categoryId, false);
                 updateEmojiCategoryPageIdView();
             }
+        } else {
+            return;
         }
+        ime.applyUiMode();
     }
 
     /**
