@@ -44,8 +44,7 @@ import androidx.core.content.FileProvider;
 import androidx.core.view.inputmethod.InputConnectionCompat;
 import androidx.core.view.inputmethod.InputContentInfoCompat;
 import android.net.Uri;
-import android.view.MotionEvent;
-import android.util.Log;
+import android.inputmethodservice.InputMethodService;
 
 /**
  * A view for searching and displaying GIFs.
@@ -56,6 +55,8 @@ public class GifSearchView extends LinearLayout {
     private ImageButton searchButton;
     private RecyclerView grid;
     private GifAdapter adapter;
+    private GridLayoutManager layoutManager;
+    private int spanCount = 2; // will be recalculated at runtime
 
     public GifSearchView(Context context, AttributeSet attrs) {
         super(context, attrs);
@@ -73,12 +74,28 @@ public class GifSearchView extends LinearLayout {
         searchButton.setFocusableInTouchMode(true);
         searchButton.setBackgroundResource(android.R.drawable.btn_default);
         grid = findViewById(R.id.gif_results_grid);
+        // Recompute span count once grid knows its width
+        grid.getViewTreeObserver().addOnGlobalLayoutListener(() -> {
+            int w = grid.getWidth();
+            if (w <= 0) return;
+
+            // desired minimum cell size in dp (tweak 120–140dp to taste)
+            int minCellPx = (int) (getResources().getDisplayMetrics().density * 128);
+
+            int cols = Math.max(2, Math.min(3, w / Math.max(1, minCellPx)));
+            if (cols != spanCount) {
+                spanCount = cols;
+                layoutManager.setSpanCount(spanCount);
+                adapter.notifyDataSetChanged();
+            }
+        });
         // Ensure grid is clickable to intercept taps
         grid.setClickable(true);
         grid.setFocusable(true);
         grid.setFocusableInTouchMode(true);
         // set up grid and adapter
-        grid.setLayoutManager(new GridLayoutManager(context, 3));
+        layoutManager = new GridLayoutManager(context, spanCount);
+        grid.setLayoutManager(layoutManager);
         adapter = new GifAdapter();
         grid.setAdapter(adapter);
         // Add gesture-based single-tap listener for grid items
@@ -239,11 +256,19 @@ public class GifSearchView extends LinearLayout {
         @Override
         public GifViewHolder onCreateViewHolder(ViewGroup parent, int viewType) {
             ImageButton iv = new ImageButton(parent.getContext());
-            // Use fixed size for grid items (96dp)
-            int size = (int) (parent.getContext().getResources().getDisplayMetrics().density * 96);
+
+            int parentW = ((RecyclerView) parent).getMeasuredWidth();
+            if (parentW <= 0) {
+                parentW = parent.getContext().getResources().getDisplayMetrics().widthPixels;
+            }
+
+            GridLayoutManager lm = (GridLayoutManager) ((RecyclerView) parent).getLayoutManager();
+            int cols = (lm != null ? lm.getSpanCount() : 2);
+            int size = Math.max(1, parentW / Math.max(1, cols));
+
             RecyclerView.LayoutParams lp = new RecyclerView.LayoutParams(size, size);
             iv.setLayoutParams(lp);
-            // Provide default button background for proper touch feedback
+
             iv.setBackgroundResource(android.R.drawable.btn_default);
             iv.setScaleType(ImageButton.ScaleType.CENTER_CROP);
             iv.setClickable(true);
@@ -254,6 +279,16 @@ public class GifSearchView extends LinearLayout {
 
         @Override
         public void onBindViewHolder(GifViewHolder holder, int position) {
+            // keep square cells even after span changes
+            holder.image.post(() -> {
+                ViewGroup.LayoutParams lp = holder.image.getLayoutParams();
+                int w = holder.image.getWidth();
+                if (w > 0 && lp.height != w) {
+                    lp.height = w;
+                    holder.image.setLayoutParams(lp);
+                }
+            });
+
             GifItem item = items.get(position);
             holder.image.setImageDrawable(null);
             new ImageLoadTask(holder.image).execute(item.previewUrl);
@@ -298,7 +333,9 @@ public class GifSearchView extends LinearLayout {
         @Override protected Uri doInBackground(GifItem... params) {
             try {
                 File dir = new File(getContext().getCacheDir(), "tenor_gifs");
-                if (!dir.exists()) dir.mkdirs();
+                if (!dir.exists() && !dir.mkdirs()) {
+                    Log.e(TAG, "Failed to create cache directory: " + dir.getAbsolutePath());
+                }
                 File out = new File(dir, item.id + ".gif");
                 if (!out.exists()) {
                     HttpURLConnection conn = (HttpURLConnection)
@@ -312,26 +349,83 @@ public class GifSearchView extends LinearLayout {
                     while ((r = is.read(buf)) > 0) fos.write(buf, 0, r);
                     fos.close(); is.close(); conn.disconnect();
                 }
-                return FileProvider.getUriForFile(getContext(),
-                        getContext().getPackageName() + ".fileprovider", out);
-            } catch (Exception e) { return null; }
+                long size = out.length();
+                Log.d(TAG, "Saved GIF file " + out.getAbsolutePath() + " size=" + size + " bytes");
+                if (size <= 0) {
+                    Log.e(TAG, "Downloaded GIF is empty, aborting insert");
+                    return null;
+                }
+                String authority = getContext().getPackageName() + ".fileprovider";
+                Log.d(TAG, "Using FileProvider authority=" + authority);
+                return FileProvider.getUriForFile(getContext(), authority, out);
+            } catch (Exception e) {
+                Log.e(TAG, "doInBackground error downloading GIF: " + e);
+                return null;
+            }
         }
         @Override protected void onPostExecute(Uri uri) {
-            if (uri == null) return;
-            ContextWrapper base = (ContextWrapper) getContext();
-            while (!(base instanceof android.inputmethodservice.InputMethodService) && 
-                    base.getBaseContext() instanceof ContextWrapper) {
-                base = (ContextWrapper) base.getBaseContext();
+            if (uri == null) {
+                Log.e(TAG, "Insert aborted: uri is null");
+                return;
             }
-            if (!(base instanceof android.inputmethodservice.InputMethodService)) return;
-            android.inputmethodservice.InputMethodService ims = (android.inputmethodservice.InputMethodService) base;
+            InputMethodService ims = getImeService();
+            if (ims == null) {
+                Log.e(TAG, "Insert aborted: could not resolve InputMethodService from context=" + getContext());
+                return;
+            }
             InputConnection ic = ims.getCurrentInputConnection();
             EditorInfo ei = ims.getCurrentInputEditorInfo();
-            ClipDescription desc = new ClipDescription("GIF", new String[]{"image/gif"});
+            if (ic == null || ei == null) {
+                Log.e(TAG, "Insert aborted: ic=" + ic + " ei=" + ei);
+                return;
+            }
+            try {
+                ic.finishComposingText();
+            } catch (Throwable t) {
+                Log.w(TAG, "finishComposingText failed: " + t);
+            }
+            String[] mimes = androidx.core.view.inputmethod.EditorInfoCompat.getContentMimeTypes(ei);
+            boolean supportsGif = false;
+            if (mimes != null) {
+                StringBuilder sb = new StringBuilder();
+                for (String m : mimes) {
+                    sb.append(m).append(" ");
+                    if (ClipDescription.compareMimeTypes(m, "image/gif")) supportsGif = true;
+                }
+                Log.d(TAG, "Editor supports MIME(s): " + sb.toString().trim());
+            } else {
+                Log.d(TAG, "Editor has no declared content MIME types");
+            }
+            android.content.ClipDescription desc = new android.content.ClipDescription("GIF", new String[]{"image/gif"});
             InputContentInfoCompat info = new InputContentInfoCompat(uri, desc, null);
-            InputConnectionCompat.commitContent(ic, ei, info,
-                    InputConnectionCompat.INPUT_CONTENT_GRANT_READ_URI_PERMISSION, null);
+            int flags = InputConnectionCompat.INPUT_CONTENT_GRANT_READ_URI_PERMISSION;
+            boolean ok = false;
+            try {
+                ok = InputConnectionCompat.commitContent(ic, ei, info, flags, null);
+            } catch (Throwable t) {
+                Log.e(TAG, "commitContent threw: " + t);
+            }
+        Log.d(TAG, "commitContent returned=" + ok + " uri=" + uri);
+        if (!ok) {
+            Log.e(TAG, "Host rejected content or commit failed. Check MIME support and FileProvider authority.");
         }
+    }
+
+    /**
+     * Resolve the hosting InputMethodService by traversing the context chain.
+     */
+    private InputMethodService getImeService() {
+        Context c = getContext();
+        int guard = 0;
+        while (c instanceof ContextWrapper && guard < 10) {
+            if (c instanceof InputMethodService) {
+                return (InputMethodService) c;
+            }
+            c = ((ContextWrapper) c).getBaseContext();
+            guard++;
+        }
+        return null;
+    }
     } // end DownloadAndSendTask
 
     // Programmatic query editing for GIF search
