@@ -225,8 +225,17 @@ public final class EmojiPalettesView extends LinearLayout
         // The main keyboard expands to the entire this {@link KeyboardView}.
         final int width = ResourceUtils.getKeyboardWidth(getContext(), Settings.getValues())
                 + getPaddingLeft() + getPaddingRight();
-        final int height = ResourceUtils.getSecondaryKeyboardHeight(res, Settings.getValues())
-                + getPaddingTop() + getPaddingBottom();
+        int height;
+        // When GIF search is active, only occupy a small panel above the main keys so the
+        // keyboard remains visible for typing into the query field programmatically.
+        if (mGifSearchView != null && mGifSearchView.getVisibility() == View.VISIBLE) {
+            final int strip = res.getDimensionPixelSize(R.dimen.config_suggestions_strip_height);
+            // Show search row + a few rows of results; adjust factor if needed.
+            height = strip * 4 + getPaddingTop() + getPaddingBottom();
+        } else {
+            height = ResourceUtils.getSecondaryKeyboardHeight(res, Settings.getValues())
+                    + getPaddingTop() + getPaddingBottom();
+        }
         mEmojiCategoryPageIndicatorView.mWidth = width;
         setMeasuredDimension(width, height);
     }
@@ -269,7 +278,8 @@ public final class EmojiPalettesView extends LinearLayout
         mPager = findViewById(R.id.emoji_pager);
         mPager.setAdapter(new PagerAdapter(mPager));
         // initialize GIF search view
-        mGifSearchView = findViewById(R.id.gif_search_view);
+        // The GIF search view is placed above the keyboard in the layout hierarchy
+        mGifSearchView = getRootView().findViewById(R.id.gif_search_view);
         mEmojiLayoutParams.setEmojiListProperties(mPager);
         mEmojiCategoryPageIndicatorView = findViewById(R.id.emoji_category_page_id_view);
         mEmojiLayoutParams.setCategoryPageIdViewProperties(mEmojiCategoryPageIndicatorView);
@@ -298,30 +308,34 @@ public final class EmojiPalettesView extends LinearLayout
                     mColors.setColor((ImageView) tab, ColorType.EMOJI_CATEGORY);
                 }
             }
-            if (mPager != null) {
-                mPager.setVisibility(View.GONE);
-            }
-            if (mEmojiCategoryPageIndicatorView != null) {
-                mEmojiCategoryPageIndicatorView.setVisibility(View.GONE);
-            }
-            if (mGifSearchView != null) {
-                mGifSearchView.setVisibility(View.VISIBLE);
-            }
+            // Hide emoji pages and page indicator
+            if (mPager != null) mPager.setVisibility(View.GONE);
+            if (mEmojiCategoryPageIndicatorView != null) mEmojiCategoryPageIndicatorView.setVisibility(View.GONE);
+            // Show GIF search view
+            if (mGifSearchView != null) mGifSearchView.setVisibility(View.VISIBLE);
+            // Ensure main keyboard keys remain visible for search input
+            MainKeyboardView mkv = KeyboardSwitcher.getInstance().getMainKeyboardView();
+            if (mkv != null) mkv.setVisibility(View.VISIBLE);
+            // Hide emoji palette pages
+            this.setVisibility(View.GONE);
+            requestLayout();
         // Emoji tab selected
         } else if (tag instanceof Long) {
             AudioAndHapticFeedbackManager.getInstance().performHapticAndAudioFeedback(KeyCode.NOT_SPECIFIED, this);
             if (mGifTab != null) {
                 mColors.setColor(mGifTab, ColorType.EMOJI_CATEGORY);
             }
-            if (mGifSearchView != null) {
-                mGifSearchView.setVisibility(View.GONE);
-            }
-            if (mPager != null) {
-                mPager.setVisibility(View.VISIBLE);
-            }
-            if (mEmojiCategoryPageIndicatorView != null) {
-                mEmojiCategoryPageIndicatorView.setVisibility(View.VISIBLE);
-            }
+            // Hide GIF search view
+            if (mGifSearchView != null) mGifSearchView.setVisibility(View.GONE);
+            // Show emoji pages and page indicator
+            if (mPager != null) mPager.setVisibility(View.VISIBLE);
+            if (mEmojiCategoryPageIndicatorView != null) mEmojiCategoryPageIndicatorView.setVisibility(View.VISIBLE);
+            // Show emoji palette pages
+            this.setVisibility(View.VISIBLE);
+            // Hide main keyboard keys when showing emoji pages
+            MainKeyboardView mkv2 = KeyboardSwitcher.getInstance().getMainKeyboardView();
+            if (mkv2 != null) mkv2.setVisibility(View.GONE);
+            requestLayout();
             final int categoryId = ((Long) tag).intValue();
             if (categoryId != mEmojiCategory.getCurrentCategoryId()) {
                 setCurrentCategoryId(categoryId, false);

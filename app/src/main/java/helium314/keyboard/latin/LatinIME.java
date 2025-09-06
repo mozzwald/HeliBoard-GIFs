@@ -46,6 +46,7 @@ import helium314.keyboard.compat.EditorInfoCompatUtils;
 import helium314.keyboard.keyboard.KeyboardActionListener;
 import helium314.keyboard.keyboard.KeyboardActionListenerImpl;
 import helium314.keyboard.keyboard.internal.KeyboardIconsSet;
+import helium314.keyboard.keyboard.emoji.GifSearchView;
 import helium314.keyboard.keyboard.internal.keyboard_parser.floris.KeyCode;
 import helium314.keyboard.latin.common.InsetsOutlineProvider;
 import helium314.keyboard.dictionarypack.DictionaryPackConstants;
@@ -1288,8 +1289,15 @@ public class LatinIME extends InputMethodService implements
             mInsetsUpdater.setInsets(outInsets);
             return;
         }
+        // Height of suggestion strip (top toolbar)
         final int stripHeight = mKeyboardSwitcher.isShowingStripContainer() ? mKeyboardSwitcher.getStripContainer().getHeight() : 0;
-        final int visibleTopY = inputHeight - visibleKeyboardView.getHeight() - stripHeight;
+        // Include GIF search view height if shown (it is placed above keyboard wrapper)
+        View gifView = mInputView.findViewById(R.id.gif_search_view);
+        final int panelHeight = (gifView != null && gifView.getVisibility() == View.VISIBLE) ? gifView.getHeight() : 0;
+        // Compute total interactive IME height: keyboard wrapper + optional GIF panel
+        final int totalKeyboardHeight = visibleKeyboardView.getHeight() + panelHeight;
+        // Top of touchable region (above strip) is inputHeight - totalKeyboardHeight - stripHeight
+        final int visibleTopY = inputHeight - totalKeyboardHeight - stripHeight;
 
         if (hasSuggestionStripView()) {
             mSuggestionStripView.setMoreSuggestionsHeight(visibleTopY);
@@ -1298,14 +1306,15 @@ public class LatinIME extends InputMethodService implements
         // Need to set expanded touchable region only if a keyboard view is being shown.
         if (visibleKeyboardView.isShown()) {
             final int touchLeft = 0;
+            // If a popup keys panel is shown, allow touches at top, else start at visibleTopY
             final int touchTop = mKeyboardSwitcher.isShowingPopupKeysPanel() ? 0 : visibleTopY;
             final int touchRight = visibleKeyboardView.getWidth();
-            final int touchBottom = inputHeight
-                    // Extend touchable region below the keyboard.
-                    + EXTENDED_TOUCHABLE_REGION_HEIGHT;
+            // Extend touchable region to include keyboard and optional panel plus extra bottom region
+            final int touchBottom = inputHeight + EXTENDED_TOUCHABLE_REGION_HEIGHT;
             outInsets.touchableInsets = InputMethodService.Insets.TOUCHABLE_INSETS_REGION;
             outInsets.touchableRegion.set(touchLeft, touchTop, touchRight, touchBottom);
         }
+        // Content and visible insets should reflect the top of the combined IME content
         outInsets.contentTopInsets = visibleTopY;
         outInsets.visibleTopInsets = visibleTopY;
         mInsetsUpdater.setInsets(outInsets);
@@ -1949,6 +1958,37 @@ public class LatinIME extends InputMethodService implements
                 mKeyboardSwitcher.trimMemory();
             }
             // deallocateMemory always called on hiding, and should not be called when showing
+        }
+    }
+    
+    /**
+     * Returns true when the GIF search panel is visible.
+     */
+    public boolean isGifSearchActive() {
+        if (mInputView == null) return false;
+        View v = mInputView.findViewById(R.id.gif_search_view);
+        return v != null && v.getVisibility() == View.VISIBLE;
+    }
+
+    /**
+     * Appends a character to the GIF search query field.
+     */
+    public void appendGifSearchChar(char c) {
+        if (mInputView == null) return;
+        View v = mInputView.findViewById(R.id.gif_search_view);
+        if (v instanceof GifSearchView) {
+            ((GifSearchView) v).appendQueryChar(c);
+        }
+    }
+
+    /**
+     * Deletes the last character from the GIF search query field.
+     */
+    public void deleteGifSearchChar() {
+        if (mInputView == null) return;
+        View v = mInputView.findViewById(R.id.gif_search_view);
+        if (v instanceof GifSearchView) {
+            ((GifSearchView) v).deleteLastChar();
         }
     }
 }

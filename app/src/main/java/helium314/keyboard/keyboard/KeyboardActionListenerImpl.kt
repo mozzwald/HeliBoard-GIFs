@@ -12,8 +12,13 @@ import helium314.keyboard.keyboard.internal.keyboard_parser.floris.KeyCode
 import helium314.keyboard.latin.EmojiAltPhysicalKeyDetector
 import helium314.keyboard.latin.LatinIME
 import helium314.keyboard.latin.RichInputMethodManager
+import helium314.keyboard.latin.R
+import helium314.keyboard.keyboard.emoji.GifSearchView
 import helium314.keyboard.latin.common.Constants
 import helium314.keyboard.latin.common.InputPointers
+import android.view.View
+import android.widget.LinearLayout
+import helium314.keyboard.keyboard.emoji.EmojiPalettesView
 import helium314.keyboard.latin.common.StringUtils
 import helium314.keyboard.latin.common.combiningRange
 import helium314.keyboard.latin.common.loopOverCodePoints
@@ -108,6 +113,48 @@ class KeyboardActionListenerImpl(private val latinIME: LatinIME, private val inp
     }
 
     override fun onCodeInput(primaryCode: Int, x: Int, y: Int, isKeyRepeat: Boolean) {
+        // Intercept key events for GIF search query editing
+        if (latinIME.isGifSearchActive()) {
+            when (primaryCode) {
+                KeyCode.DELETE -> {
+                    latinIME.deleteGifSearchChar()
+                    return
+                }
+                KeyCode.SHIFT_ENTER, Constants.CODE_ENTER -> {
+                    // Trigger GIF search via the search view
+                    val rootView = keyboardSwitcher.getWrapperView().rootView
+                    val gifView = rootView.findViewById<GifSearchView>(R.id.gif_search_view)
+                    gifView?.performSearch(gifView.getQueryField().text.toString())
+                    return
+                }
+                KeyCode.EMOJI, KeyCode.ALPHA -> {
+                    // Exit GIF search, return to emoji palette
+                    val rootView = keyboardSwitcher.getWrapperView().rootView
+                    val gifView = rootView.findViewById<GifSearchView>(R.id.gif_search_view)
+                    gifView?.visibility = View.GONE
+                    val paletteView = rootView.findViewById<EmojiPalettesView>(R.id.emoji_palettes_view)
+                    paletteView?.let {
+                        it.visibility = View.VISIBLE
+                        // Show emoji pages (first category) by simulating a tab click
+                        val tabStrip = KeyboardSwitcher.getInstance().getEmojiTabStrip() as? LinearLayout
+                        tabStrip?.let { strip ->
+                            for (i in 0 until strip.childCount) {
+                                val child = strip.getChildAt(i)
+                                if (child.tag is Long) {
+                                    child.performClick()
+                                    break
+                                }
+                            }
+                        }
+                    }
+                    return
+                }
+                else -> {
+                    latinIME.appendGifSearchChar(primaryCode.toChar())
+                    return
+                }
+            }
+        }
         when (primaryCode) {
             KeyCode.TOGGLE_AUTOCORRECT -> return Settings.getInstance().toggleAutoCorrect()
             KeyCode.TOGGLE_INCOGNITO_MODE -> return Settings.getInstance().toggleAlwaysIncognitoMode()

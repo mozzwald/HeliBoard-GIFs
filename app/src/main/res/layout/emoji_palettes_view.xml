@@ -18,14 +18,7 @@
     <androidx.viewpager2.widget.ViewPager2
         android:id="@+id/emoji_pager"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content" />
-    <!-- GIF search view: shown when GIF tab is selected -->
-    <helium314.keyboard.keyboard.emoji.GifSearchView
-        android:id="@+id/gif_search_view"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:visibility="gone" />
-    <helium314.keyboard.keyboard.emoji.EmojiCategoryPageIndicatorView
+        android:layout_height="wrap_content" />    <helium314.keyboard.keyboard.emoji.EmojiCategoryPageIndicatorView
         android:id="@+id/emoji_category_page_id_view"
         android:layout_width="match_parent"
         android:layout_height="2dip" />

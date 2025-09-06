@@ -78,4 +78,8 @@
 
     <!-- Scrollbar color -->
     <color name="toolbar_scrollbar">#66808080</color>
+
+    <!-- text used inside the GIF search EditText -->
+    <color name="gif_search_text">#FF000000</color>        <!-- black -->
+    <color name="gif_search_hint">#80000000</color>        <!-- 50% black -->    
 </resources>

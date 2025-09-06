@@ -15,6 +15,12 @@
     <include
         android:id="@+id/strip_container"
         layout="@layout/strip_container" />
+    <!-- GIF search view placed above the keyboard -->
+    <helium314.keyboard.keyboard.emoji.GifSearchView
+        android:id="@+id/gif_search_view"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:visibility="gone" />
 
     <!-- To ensure that key preview popup is correctly placed when the current system locale is
          one of RTL locales, layoutDirection="ltr" is needed in the SDK version 17+. -->

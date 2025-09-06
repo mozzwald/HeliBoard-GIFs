@@ -22,4 +22,8 @@
     <color name="action_bar_color">#FF212121</color>
     <color name="navigation_bar_color">#FF303030</color>
     <color name="sliding_items_background">#FF424242</color>
+
+    <!-- text used inside the GIF search EditText -->
+    <color name="gif_search_text">#FFFFFFFF</color>        <!-- white -->
+    <color name="gif_search_hint">#80FFFFFF</color>        <!-- 50% white -->
 </resources>

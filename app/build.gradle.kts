@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     kotlin("android")
@@ -5,8 +7,16 @@ plugins {
     kotlin("plugin.compose") version "2.0.0"
 }
 
-// TENOR API key: retrieve from project property or empty if undefined
-val tenorKey: String = project.findProperty("TENOR_API_KEY") as? String ?: ""
+// TENOR API key: retrieve from project root local.properties (key=TENOR_API_KEY)
+val localPropsFile = rootProject.file("local.properties")
+val localProps = Properties()
+if (localPropsFile.exists()) {
+    localPropsFile.reader().use { reader ->
+        localProps.load(reader)
+    }
+}
+// Provide empty string if key is missing
+val tenorKey: String = localProps.getProperty("TENOR_API_KEY", "")
 
 android {
     compileSdk = 35

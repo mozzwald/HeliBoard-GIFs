@@ -4,6 +4,10 @@ import android.content.Context;
 import android.util.AttributeSet;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.MotionEvent;
+import android.view.GestureDetector;
+import android.view.GestureDetector.SimpleOnGestureListener;
+import android.util.Log;
 import android.view.inputmethod.EditorInfo;
 import android.widget.EditText;
 import android.widget.ImageButton;
@@ -40,11 +44,14 @@ import androidx.core.content.FileProvider;
 import androidx.core.view.inputmethod.InputConnectionCompat;
 import androidx.core.view.inputmethod.InputContentInfoCompat;
 import android.net.Uri;
+import android.view.MotionEvent;
+import android.util.Log;
 
 /**
  * A view for searching and displaying GIFs.
  */
 public class GifSearchView extends LinearLayout {
+    private static final String TAG = "GifSearchView";
     private EditText queryField;
     private ImageButton searchButton;
     private RecyclerView grid;
@@ -52,16 +59,60 @@ public class GifSearchView extends LinearLayout {
 
     public GifSearchView(Context context, AttributeSet attrs) {
         super(context, attrs);
+        // Inflate layout and ensure focus/touch configuration
         View.inflate(context, R.layout.gif_search_view, this);
+        setClickable(true);
+        setFocusable(true);
+        setFocusableInTouchMode(true);
+        setDescendantFocusability(FOCUS_AFTER_DESCENDANTS);
         queryField = findViewById(R.id.gif_query_field);
         searchButton = findViewById(R.id.btn_search_gif);
+        // Ensure search button is clickable and has a background for hit-testing
+        searchButton.setClickable(true);
+        searchButton.setFocusable(true);
+        searchButton.setFocusableInTouchMode(true);
+        searchButton.setBackgroundResource(android.R.drawable.btn_default);
         grid = findViewById(R.id.gif_results_grid);
+        // Ensure grid is clickable to intercept taps
+        grid.setClickable(true);
+        grid.setFocusable(true);
+        grid.setFocusableInTouchMode(true);
         // set up grid and adapter
         grid.setLayoutManager(new GridLayoutManager(context, 3));
         adapter = new GifAdapter();
         grid.setAdapter(adapter);
+        // Add gesture-based single-tap listener for grid items
+        final GestureDetector gestureDetector = new GestureDetector(context,
+                new GestureDetector.SimpleOnGestureListener() {
+                    @Override public boolean onSingleTapUp(MotionEvent e) { return true; }
+                });
+        grid.addOnItemTouchListener(new RecyclerView.OnItemTouchListener() {
+            @Override
+            public boolean onInterceptTouchEvent(RecyclerView rv, MotionEvent e) {
+                if (!gestureDetector.onTouchEvent(e)) return false;
+                View child = rv.findChildViewUnder(e.getX(), e.getY());
+                if (child != null) {
+                    int pos = rv.getChildAdapterPosition(child);
+                    Log.d(TAG, "gif thumbnail tap id=" + pos);
+                    child.performClick();
+                    return true;
+                }
+                return false;
+            }
+            @Override public void onTouchEvent(RecyclerView rv, MotionEvent e) { }
+            @Override public void onRequestDisallowInterceptTouchEvent(boolean disallow) { }
+        });
+        // Ensure interactive children receive clicks
+        grid.setClickable(true);
+        grid.setFocusable(true);
+        grid.setFocusableInTouchMode(true);
+        searchButton.setClickable(true);
+        searchButton.setFocusable(true);
         // search on button click or IME action
-        searchButton.setOnClickListener(v -> performSearch(queryField.getText().toString()));
+        searchButton.setOnClickListener(v -> {
+            Log.d(TAG, "searchButton onClick");
+            performSearch(queryField.getText().toString());
+        });
         queryField.setOnEditorActionListener((v, actionId, event) -> {
             if (actionId == EditorInfo.IME_ACTION_SEARCH) {
                 performSearch(queryField.getText().toString());
@@ -69,6 +120,18 @@ public class GifSearchView extends LinearLayout {
             }
             return false;
         });
+    }
+
+    @Override
+    protected void onAttachedToWindow() {
+        super.onAttachedToWindow();
+        // Constrain the panel to a compact height so it sits above the main keyboard
+        int strip = getResources().getDimensionPixelSize(R.dimen.config_suggestions_strip_height);
+        ViewGroup.LayoutParams lp = getLayoutParams();
+        if (lp != null) {
+            lp.height = strip * 4; // search row + a few rows of results
+            setLayoutParams(lp);
+        }
     }
 
     public EditText getQueryField() {
@@ -84,7 +147,7 @@ public class GifSearchView extends LinearLayout {
     }
 
     /** Perform a GIF search using Tenor API. */
-    private void performSearch(String query) {
+    public void performSearch(String query) {
         if (query == null || query.isEmpty()) return;
         new FetchGifTask().execute(query);
     }
@@ -95,30 +158,45 @@ public class GifSearchView extends LinearLayout {
         protected List<GifItem> doInBackground(String... params) {
             String q = params[0];
             List<GifItem> list = new ArrayList<>();
+            HttpURLConnection conn = null;
             try {
                 String key = GifConfig.getTenorApiKey();
-                String urlStr = "https://g.tenor.com/v1/search?q=" + URLEncoder.encode(q, StandardCharsets.UTF_8.name())
-                        + "&key=" + URLEncoder.encode(key, StandardCharsets.UTF_8.name())
-                        + "&limit=10";
-                HttpURLConnection conn = (HttpURLConnection) new URL(urlStr).openConnection();
+                String encodedKey = URLEncoder.encode(key, StandardCharsets.UTF_8.name());
+                String encodedQ = URLEncoder.encode(q, StandardCharsets.UTF_8.name());
+                String urlStr = "https://tenor.googleapis.com/v2/search?key=" + encodedKey
+                        + "&q=" + encodedQ
+                        + "&limit=10&media_filter=gif,tinygif&client_key=HeliBoard";
+                // Log request with masked key
+                //String logUrl = urlStr.replaceAll("key=[^&]*", "key=****");
+                Log.d(TAG, "Tenor API Request: " + urlStr);
+                conn = (HttpURLConnection) new URL(urlStr).openConnection();
                 conn.setRequestMethod("GET");
+                conn.setConnectTimeout(10000);
+                conn.setReadTimeout(15000);
                 conn.connect();
+                int status = conn.getResponseCode();
+                Log.d(TAG, "Tenor API HTTP status: " + status);
                 InputStream in = new BufferedInputStream(conn.getInputStream());
                 BufferedReader reader = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8));
-                StringBuilder sb = new StringBuilder(); String line;
-                while ((line = reader.readLine()) != null) sb.append(line);
-                reader.close(); conn.disconnect();
+                StringBuilder sb = new StringBuilder();
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    sb.append(line);
+                }
+                reader.close();
                 JSONObject root = new JSONObject(sb.toString());
                 JSONArray results = root.optJSONArray("results");
                 if (results != null) {
                     for (int i = 0; i < results.length(); i++) {
                         JSONObject item = results.getJSONObject(i);
                         String id = item.optString("id");
-                        JSONArray media = item.optJSONArray("media");
-                        if (media != null && media.length() > 0) {
-                            JSONObject m0 = media.getJSONObject(0);
-                            JSONObject tiny = m0.optJSONObject("tinygif");
-                            JSONObject full = m0.optJSONObject("gif");
+                        JSONObject media = item.optJSONObject("media_formats");
+                        if (media != null) {
+                            JSONObject tiny = media.optJSONObject("tinygif");
+                            if (tiny == null) {
+                                tiny = media.optJSONObject("nanogif");
+                            }
+                            JSONObject full = media.optJSONObject("gif");
                             if (tiny != null && full != null) {
                                 String preview = tiny.optString("url");
                                 String fullUrl = full.optString("url");
@@ -127,7 +205,14 @@ public class GifSearchView extends LinearLayout {
                         }
                     }
                 }
-            } catch (Exception e) { /* ignore */ }
+                Log.d(TAG, "Parsed GIF results: " + list.size());
+            } catch (Exception e) {
+                // ignore
+            } finally {
+                if (conn != null) {
+                    conn.disconnect();
+                }
+            }
             return list;
         }
 
@@ -154,10 +239,16 @@ public class GifSearchView extends LinearLayout {
         @Override
         public GifViewHolder onCreateViewHolder(ViewGroup parent, int viewType) {
             ImageButton iv = new ImageButton(parent.getContext());
-            iv.setLayoutParams(new RecyclerView.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    parent.getWidth() / 3));
+            // Use fixed size for grid items (96dp)
+            int size = (int) (parent.getContext().getResources().getDisplayMetrics().density * 96);
+            RecyclerView.LayoutParams lp = new RecyclerView.LayoutParams(size, size);
+            iv.setLayoutParams(lp);
+            // Provide default button background for proper touch feedback
+            iv.setBackgroundResource(android.R.drawable.btn_default);
             iv.setScaleType(ImageButton.ScaleType.CENTER_CROP);
+            iv.setClickable(true);
+            iv.setFocusable(true);
+            iv.setFocusableInTouchMode(true);
             return new GifViewHolder(iv);
         }
 
@@ -166,7 +257,10 @@ public class GifSearchView extends LinearLayout {
             GifItem item = items.get(position);
             holder.image.setImageDrawable(null);
             new ImageLoadTask(holder.image).execute(item.previewUrl);
-            holder.image.setOnClickListener(v -> new DownloadAndSendTask(item).execute(item));
+            holder.image.setOnClickListener(v -> {
+                Log.d(TAG, "thumbnail onClick id=" + item.id);
+                new DownloadAndSendTask(item).execute(item);
+            });
         }
 
         @Override public int getItemCount() { return items.size(); }
@@ -184,10 +278,13 @@ public class GifSearchView extends LinearLayout {
         @Override protected Bitmap doInBackground(String... urls) {
             try {
                 HttpURLConnection conn = (HttpURLConnection) new URL(urls[0]).openConnection();
+                conn.setConnectTimeout(10000);
+                conn.setReadTimeout(15000);
                 conn.connect();
                 InputStream is = conn.getInputStream();
                 Bitmap bm = BitmapFactory.decodeStream(is);
-                is.close(); conn.disconnect();
+                is.close();
+                conn.disconnect();
                 return bm;
             } catch (Exception e) { return null; }
         }
@@ -206,6 +303,8 @@ public class GifSearchView extends LinearLayout {
                 if (!out.exists()) {
                     HttpURLConnection conn = (HttpURLConnection)
                             new URL(item.fullUrl).openConnection();
+                    conn.setConnectTimeout(10000);
+                    conn.setReadTimeout(15000);
                     conn.connect();
                     InputStream is = conn.getInputStream();
                     FileOutputStream fos = new FileOutputStream(out);
@@ -233,5 +332,53 @@ public class GifSearchView extends LinearLayout {
             InputConnectionCompat.commitContent(ic, ei, info,
                     InputConnectionCompat.INPUT_CONTENT_GRANT_READ_URI_PERMISSION, null);
         }
+    } // end DownloadAndSendTask
+
+    // Programmatic query editing for GIF search
+    public void appendQueryChar(char c) {
+        queryField.append(Character.toString(c));
+    }
+
+    public void deleteLastChar() {
+        String s = queryField.getText().toString();
+        if (!s.isEmpty()) {
+            String newText = s.substring(0, s.length() - 1);
+            queryField.setText(newText);
+            queryField.setSelection(newText.length());
+        }
+    }
+    /** Never intercept; let children handle touches first, but log intercept events */
+    @Override
+    public boolean onInterceptTouchEvent(MotionEvent ev) {
+        switch (ev.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN:
+            case MotionEvent.ACTION_UP:
+                Log.d(TAG, "GifSearchView onInterceptTouchEvent action=" + ev.getActionMasked());
+                break;
+        }
+        return false;
+    }
+
+    /** Consume unhandled touch events to prevent click-through, logging them */
+    @Override
+    public boolean onTouchEvent(MotionEvent ev) {
+        switch (ev.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN:
+            case MotionEvent.ACTION_UP:
+                Log.d(TAG, "GifSearchView onTouchEvent action=" + ev.getActionMasked());
+                break;
+        }
+        return true;
+    }
+
+    /** Dispatch to children, then pass to onTouchEvent if unhandled */
+    @Override
+    public boolean dispatchTouchEvent(MotionEvent ev) {
+        boolean handled = super.dispatchTouchEvent(ev);
+        if (!handled) {
+            handled = onTouchEvent(ev);
+        }
+        Log.d(TAG, "GifSearchView dispatchTouchEvent handled=" + handled + " action=" + ev.getActionMasked());
+        return handled;
     }
 }
