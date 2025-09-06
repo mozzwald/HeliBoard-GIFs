@@ -44,8 +44,20 @@ import android.view.inputmethod.EditorInfo;
 import androidx.core.content.FileProvider;
 import androidx.core.view.inputmethod.InputConnectionCompat;
 import androidx.core.view.inputmethod.InputContentInfoCompat;
+import com.bumptech.glide.Glide;
+import com.bumptech.glide.RequestManager;
+import com.bumptech.glide.load.engine.DiskCacheStrategy;
+import com.bumptech.glide.load.resource.drawable.DrawableTransitionOptions;
 import android.net.Uri;
 import android.inputmethodservice.InputMethodService;
+import android.graphics.Movie;
+import android.graphics.Canvas;
+import android.widget.Toast;
+import java.io.FileInputStream;
+import android.content.Intent;
+import android.content.ClipData;
+import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
 
 /**
  * A view for searching and displaying GIFs.
@@ -58,24 +70,38 @@ public class GifSearchView extends LinearLayout {
     private GifAdapter adapter;
     private GifActionsListener actionsListener;
     private GridLayoutManager layoutManager;
+    private RequestManager glide;
     private int spanCount = 2; // will be recalculated at runtime
 
     public GifSearchView(Context context, AttributeSet attrs) {
         super(context, attrs);
         // Inflate layout and ensure focus/touch configuration
         View.inflate(context, R.layout.gif_search_view, this);
-        setClickable(true);
+        setClickable(false);
         setFocusable(true);
-        setFocusableInTouchMode(true);
+        setFocusableInTouchMode(false);
         setDescendantFocusability(FOCUS_AFTER_DESCENDANTS);
         queryField = findViewById(R.id.gif_query_field);
         searchButton = findViewById(R.id.btn_search_gif);
         // Ensure search button is clickable and has a background for hit-testing
         searchButton.setClickable(true);
-        searchButton.setFocusable(true);
-        searchButton.setFocusableInTouchMode(true);
+        searchButton.setFocusable(false);
+        searchButton.setFocusableInTouchMode(false);
         searchButton.setBackgroundResource(android.R.drawable.btn_default);
         grid = findViewById(R.id.gif_results_grid);
+        // Setup Glide for animated previews
+        glide = Glide.with(this);
+        grid.setHasFixedSize(true);
+        grid.setItemViewCacheSize(20);
+        grid.addOnScrollListener(new RecyclerView.OnScrollListener() {
+            @Override public void onScrollStateChanged(RecyclerView rv, int newState) {
+                if (newState == RecyclerView.SCROLL_STATE_SETTLING) {
+                    glide.pauseRequests();
+                } else {
+                    glide.resumeRequests();
+                }
+            }
+        });
         // Recompute span count once grid knows its width
         grid.getViewTreeObserver().addOnGlobalLayoutListener(() -> {
             int w = grid.getWidth();
@@ -171,10 +197,13 @@ public class GifSearchView extends LinearLayout {
         new FetchGifTask().execute(query);
     }
     /**
-     * Listener to notify when a GIF has been inserted.
+     * Listener to notify when GIF actions occur.
      */
     public interface GifActionsListener {
+        /** Called when a GIF has been inserted into the editor. */
         void onGifInsertCompleted();
+        /** Called when GIF search results are visible (non-empty). */
+        void onGifResultsVisible();
     }
     /**
      * Set listener for GIF insertion completion.
@@ -212,7 +241,7 @@ public class GifSearchView extends LinearLayout {
                 String encodedQ = URLEncoder.encode(q, StandardCharsets.UTF_8.name());
                 String urlStr = "https://tenor.googleapis.com/v2/search?key=" + encodedKey
                         + "&q=" + encodedQ
-                        + "&limit=10&media_filter=gif,tinygif&client_key=HeliBoard";
+                        + "&limit=25&media_filter=gif,tinygif&client_key=HeliBoard";
                 // Log request with masked key
                 //String logUrl = urlStr.replaceAll("key=[^&]*", "key=****");
                 Log.d(TAG, "Tenor API Request: " + urlStr);
@@ -266,6 +295,10 @@ public class GifSearchView extends LinearLayout {
         @Override
         protected void onPostExecute(List<GifItem> items) {
             adapter.setItems(items);
+            // Notify listener that results are visible if non-empty
+            if (actionsListener != null && items != null && !items.isEmpty()) {
+                actionsListener.onGifResultsVisible();
+            }
         }
     }
 
@@ -318,17 +351,28 @@ public class GifSearchView extends LinearLayout {
                     holder.image.setLayoutParams(lp);
                 }
             });
-
             GifItem item = items.get(position);
-            holder.image.setImageDrawable(null);
-            new ImageLoadTask(holder.image).execute(item.previewUrl);
+            // Clear any previous request
+            Glide.with(holder.image).clear(holder.image);
+            // Load animated tiny GIF preview
+            glide.asGif()
+                 .load(item.previewUrl)
+                 .diskCacheStrategy(DiskCacheStrategy.AUTOMATIC)
+                 .transition(DrawableTransitionOptions.withCrossFade())
+                 .centerCrop()
+                 .into(holder.image);
             holder.image.setOnClickListener(v -> {
-                Log.d(TAG, "thumbnail onClick id=" + item.id);
+                Log.d(TAG, "thumbnail onClick id=" + item.id + " fullUrl=" + item.fullUrl);
                 new DownloadAndSendTask(item).execute(item);
             });
         }
 
         @Override public int getItemCount() { return items.size(); }
+        @Override
+        public void onViewRecycled(GifViewHolder holder) {
+            Glide.with(holder.image).clear(holder.image);
+            super.onViewRecycled(holder);
+        }
 
         class GifViewHolder extends RecyclerView.ViewHolder {
             final ImageButton image;
@@ -426,39 +470,62 @@ public class GifSearchView extends LinearLayout {
             } else {
                 Log.d(TAG, "Editor has no declared content MIME types");
             }
-            android.content.ClipDescription desc = new android.content.ClipDescription("GIF", new String[]{"image/gif"});
-            InputContentInfoCompat info = new InputContentInfoCompat(uri, desc, null);
-            int flags = InputConnectionCompat.INPUT_CONTENT_GRANT_READ_URI_PERMISSION;
-            boolean ok = false;
-            try {
-                ok = InputConnectionCompat.commitContent(ic, ei, info, flags, null);
-            } catch (Throwable t) {
-                Log.e(TAG, "commitContent threw: " + t);
-            }
-            Log.d(TAG, "commitContent returned=" + ok + " uri=" + uri);
-            if (!ok) {
-                Log.e(TAG, "Host rejected content or commit failed. Check MIME support and FileProvider authority.");
-            }
-            // If commit succeeded, reset GIF UI and return to alphabet keyboard
-            if (ok) {
-                // clear search field and results
+            String authority = getContext().getPackageName() + ".fileprovider";
+            // Try GIF first
+            if (tryCommit(ic, ei, uri, "image/gif")) {
                 resetGifUi();
-                // hide GIF search view
                 GifSearchView.this.setVisibility(View.GONE);
-                // switch to alphabet (regular) keyboard
                 InputMethodService ims2 = getImeService();
                 if (ims2 != null) {
                     try {
-                        // switch to main alphabet keyboard
                         helium314.keyboard.keyboard.KeyboardSwitcher.getInstance().setAlphabetKeyboard();
                     } catch (Throwable t) {
                         Log.w(TAG, "Error switching to alphabet keyboard: " + t);
                     }
                 }
-                // notify listener if any
                 if (actionsListener != null) {
                     actionsListener.onGifInsertCompleted();
                 }
+                return;
+            }
+            // Try static PNG first frame
+            File gifFile = new File(getContext().getCacheDir(), "tenor_gifs/" + item.id + ".gif");
+            File pngFile = convertGifToPngFirstFrame(gifFile);
+            if (pngFile != null) {
+                Uri pngUri = FileProvider.getUriForFile(getContext(), authority, pngFile);
+                if (tryCommit(ic, ei, pngUri, "image/png")) {
+                    resetGifUi();
+                    GifSearchView.this.setVisibility(View.GONE);
+                    InputMethodService ims3 = getImeService();
+                    if (ims3 != null) {
+                        try {
+                            helium314.keyboard.keyboard.KeyboardSwitcher.getInstance().setAlphabetKeyboard();
+                        } catch (Throwable t) {
+                            Log.w(TAG, "Error switching to alphabet keyboard: " + t);
+                        }
+                    }
+                    if (actionsListener != null) {
+                        actionsListener.onGifInsertCompleted();
+                    }
+                    return;
+                }
+            }
+            // All commitContent attempts failed; fallback to Share sheet
+            // Prefer sharing the original GIF
+            File gifFileShare = new File(getContext().getCacheDir(), "tenor_gifs/" + item.id + ".gif");
+            if (gifFileShare.exists()) {
+                Uri shareGif = FileProvider.getUriForFile(getContext(), authority, gifFileShare);
+                Log.d(TAG, "Falling back to Share sheet with GIF");
+                launchShareSheet(shareGif, "image/gif");
+                return;
+            } else if (pngFile != null && pngFile.exists()) {
+                Uri sharePng = FileProvider.getUriForFile(getContext(), authority, pngFile);
+                Log.d(TAG, "Falling back to Share sheet with PNG");
+                launchShareSheet(sharePng, "image/png");
+                return;
+            } else {
+                Log.e(TAG, "All commit and share fallbacks failed; no file to share");
+                Toast.makeText(getContext(), "This app doesn't accept images from the keyboard", Toast.LENGTH_SHORT).show();
             }
     }
 
@@ -477,7 +544,100 @@ public class GifSearchView extends LinearLayout {
         }
         return null;
     }
-    } // end DownloadAndSendTask
+    // Helper to try committing content with a given MIME type
+    private boolean tryCommit(InputConnection ic, EditorInfo ei, Uri uri, String mime) {
+        ClipDescription desc = new ClipDescription("IMAGE", new String[]{mime});
+        InputContentInfoCompat info = new InputContentInfoCompat(uri, desc, null);
+        int flags = InputConnectionCompat.INPUT_CONTENT_GRANT_READ_URI_PERMISSION;
+        boolean ok = false;
+        try {
+            ok = InputConnectionCompat.commitContent(ic, ei, info, flags, null);
+        } catch (Throwable t) {
+            Log.e(TAG, "commitContent(" + mime + ") threw: " + t);
+        }
+        Log.d(TAG, "commitContent(" + mime + ") returned=" + ok + " uri=" + uri);
+        return ok;
+    }
+
+    // Helper to convert the first frame of a GIF to a static PNG
+    private File convertGifToPngFirstFrame(File gifFile) {
+        FileInputStream fis = null;
+        try {
+            fis = new FileInputStream(gifFile);
+            Movie mv = Movie.decodeStream(fis);
+            if (mv == null) {
+                Log.e(TAG, "Movie decode failed");
+                return null;
+            }
+            int w = Math.max(1, mv.width());
+            int h = Math.max(1, mv.height());
+            Bitmap bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+            Canvas c = new Canvas(bmp);
+            mv.setTime(0);
+            mv.draw(c, 0, 0);
+            File outDir = new File(getContext().getCacheDir(), "tenor_gifs_png");
+            if (!outDir.exists() && !outDir.mkdirs()) {
+                Log.e(TAG, "Failed to create cache directory for PNG: " + outDir.getAbsolutePath());
+                return null;
+            }
+            String name = gifFile.getName();
+            if (name.toLowerCase().endsWith(".gif")) {
+                name = name.substring(0, name.length() - 4);
+            }
+            File outPng = new File(outDir, name + ".png");
+            FileOutputStream fos = new FileOutputStream(outPng);
+            bmp.compress(Bitmap.CompressFormat.PNG, 100, fos);
+            fos.flush();
+            fos.close();
+            Log.d(TAG, "Wrote PNG first-frame: " + outPng.getAbsolutePath() + " size=" + outPng.length());
+            return outPng;
+        } catch (Throwable t) {
+            Log.e(TAG, "convertGifToPngFirstFrame failed", t);
+            return null;
+        } finally {
+            if (fis != null) {
+                try {
+                    fis.close();
+                } catch (Throwable ignore) {}
+            }
+        }
+    }
+
+    // Fallback: launch system share sheet with the image URI
+    private void launchShareSheet(Uri uri, String mime) {
+        if (uri == null || mime == null) {
+            Log.e(TAG, "launchShareSheet: missing uri or mime");
+            Toast.makeText(getContext(), "Unable to share image", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        try {
+            Intent send = new Intent(Intent.ACTION_SEND);
+            send.setType(mime);
+            send.putExtra(Intent.EXTRA_STREAM, uri);
+            send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            send.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            send.setClipData(ClipData.newUri(getContext().getContentResolver(), "image", uri));
+            PackageManager pm = getContext().getPackageManager();
+            List<ResolveInfo> targets = pm.queryIntentActivities(send, PackageManager.MATCH_DEFAULT_ONLY);
+            for (ResolveInfo ri : targets) {
+                String pkg = ri.activityInfo.packageName;
+                try {
+                    getContext().grantUriPermission(pkg, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                } catch (Throwable t) {
+                    Log.w(TAG, "grantUriPermission failed for " + pkg + ": " + t);
+                }
+            }
+            Intent chooser = Intent.createChooser(send, "Send GIF");
+            chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(chooser);
+            resetGifUi();
+            if (actionsListener != null) actionsListener.onGifInsertCompleted();
+        } catch (Throwable t) {
+            Log.e(TAG, "launchShareSheet failed", t);
+            Toast.makeText(getContext(), "No app available to share image", Toast.LENGTH_SHORT).show();
+        }
+    }
+} // end DownloadAndSendTask
 
     // Programmatic query editing for GIF search
     public void appendQueryChar(char c) {
@@ -513,16 +673,16 @@ public class GifSearchView extends LinearLayout {
                 Log.d(TAG, "GifSearchView onTouchEvent action=" + ev.getActionMasked());
                 break;
         }
-        return true;
+        return false;
     }
 
     /** Dispatch to children, then pass to onTouchEvent if unhandled */
     @Override
     public boolean dispatchTouchEvent(MotionEvent ev) {
         boolean handled = super.dispatchTouchEvent(ev);
-        if (!handled) {
+        /*if (!handled) {
             handled = onTouchEvent(ev);
-        }
+        }*/
         Log.d(TAG, "GifSearchView dispatchTouchEvent handled=" + handled + " action=" + ev.getActionMasked());
         return handled;
     }

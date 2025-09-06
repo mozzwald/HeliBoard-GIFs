@@ -869,10 +869,22 @@ public class LatinIME extends InputMethodService implements
         mInputView = view;
         mInsetsUpdater = ViewOutlineProviderUtilsKt.setInsetsOutlineProvider(view);
         updateSoftInputWindowLayoutParameters();
-        mSuggestionStripView = mSettings.getCurrent().mToolbarMode == ToolbarMode.HIDDEN?
-                        null : view.findViewById(R.id.suggestion_strip_view);
+        mSuggestionStripView = mSettings.getCurrent().mToolbarMode == ToolbarMode.HIDDEN
+                        ? null : view.findViewById(R.id.suggestion_strip_view);
         if (hasSuggestionStripView()) {
             mSuggestionStripView.setListener(this, view);
+        }
+        // Wire GIF search view listener for cascading full-height panel behavior
+        GifSearchView gifSearchView = view.findViewById(R.id.gif_search_view);
+        if (gifSearchView != null) {
+            gifSearchView.setActionsListener(new GifSearchView.GifActionsListener() {
+                @Override public void onGifInsertCompleted() {
+                    showKeyboardNormal();
+                }
+                @Override public void onGifResultsVisible() {
+                    showGifResultsFullHeight();
+                }
+            });
         }
     }
 
@@ -1272,53 +1284,67 @@ public class LatinIME extends InputMethodService implements
     @Override
     public void onComputeInsets(final InputMethodService.Insets outInsets) {
         super.onComputeInsets(outInsets);
-        // This method may be called before {@link #setInputView(View)}.
-        if (mInputView == null) {
-            return;
-        }
-        final View visibleKeyboardView = mKeyboardSwitcher.getWrapperView();
-        if (visibleKeyboardView == null) {
-            return;
-        }
-        final int inputHeight = mInputView.getHeight();
-        if (isImeSuppressedByHardwareKeyboard() && !visibleKeyboardView.isShown()) {
-            // If there is a hardware keyboard and a visible software keyboard view has been hidden,
-            // no visual element will be shown on the screen.
-            // for some reason setting contentTopInsets and visibleTopInsets broke somewhere along the
-            // way from OpenBoard to HeliBoard (GH-702, GH-1455), but not setting anything seems to work
-            mInsetsUpdater.setInsets(outInsets);
-            return;
-        }
-        // Height of suggestion strip (top toolbar)
-        final int stripHeight = mKeyboardSwitcher.isShowingStripContainer() ? mKeyboardSwitcher.getStripContainer().getHeight() : 0;
-        // Include GIF search view height if shown (it is placed above keyboard wrapper)
-        View gifView = mInputView.findViewById(R.id.gif_search_view);
-        final int panelHeight = (gifView != null && gifView.getVisibility() == View.VISIBLE) ? gifView.getHeight() : 0;
-        // Compute total interactive IME height: keyboard wrapper + optional GIF panel
-        final int totalKeyboardHeight = visibleKeyboardView.getHeight() + panelHeight;
-        // Top of touchable region (above strip) is inputHeight - totalKeyboardHeight - stripHeight
-        final int visibleTopY = inputHeight - totalKeyboardHeight - stripHeight;
-
-        if (hasSuggestionStripView()) {
-            mSuggestionStripView.setMoreSuggestionsHeight(visibleTopY);
-        }
-
-        // Need to set expanded touchable region only if a keyboard view is being shown.
-        if (visibleKeyboardView.isShown()) {
-            final int touchLeft = 0;
-            // If a popup keys panel is shown, allow touches at top, else start at visibleTopY
-            final int touchTop = mKeyboardSwitcher.isShowingPopupKeysPanel() ? 0 : visibleTopY;
-            final int touchRight = visibleKeyboardView.getWidth();
-            // Extend touchable region to include keyboard and optional panel plus extra bottom region
-            final int touchBottom = inputHeight + EXTENDED_TOUCHABLE_REGION_HEIGHT;
-            outInsets.touchableInsets = InputMethodService.Insets.TOUCHABLE_INSETS_REGION;
-            outInsets.touchableRegion.set(touchLeft, touchTop, touchRight, touchBottom);
-        }
-        // Content and visible insets should reflect the top of the combined IME content
-        outInsets.contentTopInsets = visibleTopY;
-        outInsets.visibleTopInsets = visibleTopY;
-        mInsetsUpdater.setInsets(outInsets);
+        View root = getWindow().getWindow().getDecorView();
+        // Identify suggestion strip (toolbar), GIF panel, and keyboard view heights
+        View strip = (mInputView != null) ? mInputView.findViewById(R.id.strip_container) : null;
+        View panel = (mInputView != null) ? mInputView.findViewById(R.id.gif_search_view) : null;
+        View keys = (mInputView != null) ? mInputView.findViewById(R.id.keyboard_view_wrapper) : null;
+        int viewW = root != null ? root.getWidth() : 0;
+        int viewH = root != null ? root.getHeight() : 0;
+        int sH = (strip != null && strip.getVisibility() == View.VISIBLE) ? strip.getHeight() : 0;
+        int pH = (panel != null && panel.getVisibility() == View.VISIBLE) ? panel.getHeight() : 0;
+        int kH = (keys != null && keys.getVisibility() == View.VISIBLE) ? keys.getHeight() : 0;
+        int totalH = sH + pH + kH;
+        outInsets.touchableInsets = InputMethodService.Insets.TOUCHABLE_INSETS_REGION;
+        outInsets.touchableRegion.set(0, Math.max(0, viewH - totalH), viewW, viewH);
+        outInsets.contentTopInsets = Math.max(0, viewH - totalH);
+        outInsets.visibleTopInsets = Math.max(0, viewH - totalH);
     }
+
+    /**
+     * Expand the GIF panel to full IME height, hiding the keyboard keys.
+     */
+    public void showGifResultsFullHeight() {
+        if (mInputView == null) return;
+        View panel = mInputView.findViewById(R.id.gif_search_view);
+        View keys = mInputView.findViewById(R.id.keyboard_view_wrapper);
+        View strip = mInputView.findViewById(R.id.strip_container);
+        if (panel != null) {
+            panel.setVisibility(View.VISIBLE);
+            // Expand panel to fill remaining IME height (below strip)
+            View root = getWindow().getWindow().getDecorView();
+            int totalH = (root != null ? root.getHeight() : mInputView.getHeight());
+            int stripH = (strip != null && strip.getVisibility() == View.VISIBLE) ? strip.getHeight() : 0;
+            LayoutParams lp = panel.getLayoutParams();
+            lp.height = totalH - stripH;
+            panel.setLayoutParams(lp);
+        }
+        if (keys != null) {
+            keys.setVisibility(View.GONE);
+        }
+    }
+
+    /**
+     * Restore normal keyboard view, showing keys alongside the GIF panel.
+     */
+    public void showKeyboardNormal() {
+        if (mInputView == null) return;
+        View panel = mInputView.findViewById(R.id.gif_search_view);
+        View keys = mInputView.findViewById(R.id.keyboard_view_wrapper);
+        if (panel != null) {
+            // Reset panel to wrap content
+            LayoutParams lp = panel.getLayoutParams();
+            lp.height = LayoutParams.WRAP_CONTENT;
+            panel.setLayoutParams(lp);
+            panel.setVisibility(View.VISIBLE);
+        }
+        if (keys != null) {
+            keys.setVisibility(View.VISIBLE);
+        }
+        View root = getWindow().getWindow().getDecorView();
+        if (root != null) root.requestLayout();
+    }
+
 
     public void startShowingInputView(final boolean needsToLoadKeyboard) {
         mIsExecutingStartShowingInputView = true;
@@ -1810,6 +1836,16 @@ public class LatinIME extends InputMethodService implements
     // Hooks for hardware keyboard
     @Override
     public boolean onKeyDown(final int keyCode, final KeyEvent keyEvent) {
+        // Handle back key to exit full-screen GIF panel
+        if (keyCode == KeyEvent.KEYCODE_BACK) {
+            View panel = (mInputView != null) ? mInputView.findViewById(R.id.gif_search_view) : null;
+            View keys = (mInputView != null) ? mInputView.findViewById(R.id.keyboard_view_wrapper) : null;
+            if (panel != null && panel.getVisibility() == View.VISIBLE
+                    && keys != null && keys.getVisibility() == View.GONE) {
+                showKeyboardNormal();
+                return true;
+            }
+        }
         if (mKeyboardActionListener.onKeyDown(keyCode, keyEvent))
             return true;
         return super.onKeyDown(keyCode, keyEvent);
