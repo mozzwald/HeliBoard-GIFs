@@ -29,6 +29,7 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import androidx.annotation.Nullable;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -71,6 +72,21 @@ public class GifSearchView extends LinearLayout {
     private GifActionsListener actionsListener;
     private GridLayoutManager layoutManager;
     private RequestManager glide;
+    // Pagination state for endless scrolling
+    private volatile boolean isLoading = false;
+    private volatile boolean hasMore = true;
+    @Nullable private String nextPos = null;
+    @Nullable private String currentQuery = null;
+    /**
+     * Load the next page of GIF results using Tenor v2 pagination cursor.
+     */
+    private void loadNextPage() {
+        if (isLoading || !hasMore) return;
+        if (currentQuery == null || currentQuery.isEmpty()) return;
+        if (nextPos == null || nextPos.isEmpty()) { hasMore = false; return; }
+        isLoading = true;
+        new FetchGifTask().execute(currentQuery, nextPos);
+    }
     private ImageButton clearButton;
     // Helpers for editing state
     public boolean hasResults() {
@@ -125,6 +141,22 @@ public class GifSearchView extends LinearLayout {
                     glide.pauseRequests();
                 } else {
                     glide.resumeRequests();
+                }
+            }
+        });
+        // Endless scroll for loading more GIFs
+        grid.addOnScrollListener(new RecyclerView.OnScrollListener() {
+            @Override public void onScrolled(RecyclerView rv, int dx, int dy) {
+                if (dy <= 0) return; // only down
+                if (isLoading || !hasMore) return;
+                RecyclerView.LayoutManager lm = rv.getLayoutManager();
+                if (!(lm instanceof GridLayoutManager)) return;
+                GridLayoutManager glm = (GridLayoutManager) lm;
+                int total = adapter.getItemCount();
+                int lastVisible = glm.findLastVisibleItemPosition();
+                int threshold = 6;
+                if (total > 0 && lastVisible >= total - threshold) {
+                    GifSearchView.this.loadNextPage();
                 }
             }
         });
@@ -220,6 +252,14 @@ public class GifSearchView extends LinearLayout {
     /** Perform a GIF search using Tenor API. */
     public void performSearch(String query) {
         if (query == null || query.isEmpty()) return;
+        // Reset pagination state for new search
+        currentQuery = query;
+        isLoading = false;
+        hasMore = true;
+        nextPos = null;
+        adapter.setItems(Collections.emptyList());
+        adapter.notifyDataSetChanged();
+        if (actionsListener != null) actionsListener.onGifEditingStateChanged(true);
         new FetchGifTask().execute(query);
     }
     /**
@@ -267,18 +307,27 @@ public class GifSearchView extends LinearLayout {
 
     /** AsyncTask to fetch GIF search results. */
     private class FetchGifTask extends AsyncTask<String, Void, List<GifItem>> {
+        private boolean isLoadMore;
         @Override
         protected List<GifItem> doInBackground(String... params) {
             String q = params[0];
+            String pos = (params.length > 1) ? params[1] : null;
+            isLoadMore = (pos != null && !pos.isEmpty());
+            currentQuery = q;
             List<GifItem> list = new ArrayList<>();
             HttpURLConnection conn = null;
             try {
                 String key = GifConfig.getTenorApiKey();
                 String encodedKey = URLEncoder.encode(key, StandardCharsets.UTF_8.name());
                 String encodedQ = URLEncoder.encode(q, StandardCharsets.UTF_8.name());
-                String urlStr = "https://tenor.googleapis.com/v2/search?key=" + encodedKey
+                StringBuilder sbUrl = new StringBuilder(
+                        "https://tenor.googleapis.com/v2/search?key=" + encodedKey
                         + "&q=" + encodedQ
-                        + "&limit=25&media_filter=gif,tinygif&client_key=HeliBoard";
+                        + "&limit=25&media_filter=gif,tinygif&client_key=HeliBoard");
+                if (pos != null && !pos.isEmpty()) {
+                    sbUrl.append("&pos=").append(URLEncoder.encode(pos, StandardCharsets.UTF_8.name()));
+                }
+                String urlStr = sbUrl.toString();
                 // Log request with masked key
                 //String logUrl = urlStr.replaceAll("key=[^&]*", "key=****");
                 Log.d(TAG, "Tenor API Request: " + urlStr);
@@ -298,6 +347,10 @@ public class GifSearchView extends LinearLayout {
                 }
                 reader.close();
                 JSONObject root = new JSONObject(sb.toString());
+                // Pagination cursor
+                String next = root.optString("next", null);
+                nextPos = (next != null && !next.isEmpty()) ? next : null;
+                hasMore = (nextPos != null);
                 JSONArray results = root.optJSONArray("results");
                 if (results != null) {
                     for (int i = 0; i < results.length(); i++) {
@@ -318,7 +371,7 @@ public class GifSearchView extends LinearLayout {
                         }
                     }
                 }
-                Log.d(TAG, "Parsed GIF results: " + list.size());
+                Log.d(TAG, "Parsed GIF results: " + list.size() + " next=" + nextPos);
             } catch (Exception e) {
                 // ignore
             } finally {
@@ -331,15 +384,24 @@ public class GifSearchView extends LinearLayout {
 
         @Override
         protected void onPostExecute(List<GifItem> items) {
-            adapter.setItems(items);
-            boolean has = items != null && !items.isEmpty();
-            if (actionsListener != null) {
-                if (has) {
-                    actionsListener.onGifResultsVisible();
-                }
-                // browsing if results exist: hide keys; else editing: show keys
-                actionsListener.onGifEditingStateChanged(!has);
+            isLoading = false;
+            if (items == null || items.isEmpty()) {
+                hasMore = false;
+                return;
             }
+            if (isLoadMore) {
+                // Append more items
+                int start = adapter.getItemCount();
+                adapter.appendItems(items);
+                adapter.notifyItemRangeInserted(start, items.size());
+            } else {
+                // First page
+                adapter.setItems(items);
+                adapter.notifyDataSetChanged();
+                if (actionsListener != null) actionsListener.onGifResultsVisible();
+            }
+            // After load, editing state depends on having results => browsing mode hides keys
+            if (actionsListener != null) actionsListener.onGifEditingStateChanged(false);
         }
     }
 
@@ -356,6 +418,11 @@ public class GifSearchView extends LinearLayout {
         private List<GifItem> items = new ArrayList<>();
 
         void setItems(List<GifItem> list) { this.items = list; notifyDataSetChanged(); }
+        /** Append items for pagination. */
+        void appendItems(List<GifItem> more) {
+            if (more == null || more.isEmpty()) return;
+            this.items.addAll(more);
+        }
 
         @Override
         public GifViewHolder onCreateViewHolder(ViewGroup parent, int viewType) {
@@ -643,6 +710,7 @@ public class GifSearchView extends LinearLayout {
             }
         }
     }
+
 
     // Fallback: launch system share sheet with the image URI
     private void launchShareSheet(Uri uri, String mime) {
