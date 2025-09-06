@@ -33,6 +33,7 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Collections;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.os.AsyncTask;
@@ -55,6 +56,7 @@ public class GifSearchView extends LinearLayout {
     private ImageButton searchButton;
     private RecyclerView grid;
     private GifAdapter adapter;
+    private GifActionsListener actionsListener;
     private GridLayoutManager layoutManager;
     private int spanCount = 2; // will be recalculated at runtime
 
@@ -167,6 +169,34 @@ public class GifSearchView extends LinearLayout {
     public void performSearch(String query) {
         if (query == null || query.isEmpty()) return;
         new FetchGifTask().execute(query);
+    }
+    /**
+     * Listener to notify when a GIF has been inserted.
+     */
+    public interface GifActionsListener {
+        void onGifInsertCompleted();
+    }
+    /**
+     * Set listener for GIF insertion completion.
+     */
+    public void setActionsListener(GifActionsListener l) {
+        this.actionsListener = l;
+    }
+    /**
+     * Reset the GIF UI: clear query and results.
+     */
+    private void resetGifUi() {
+        try {
+            EditText q = findViewById(R.id.gif_query_field);
+            if (q != null) q.setText("");
+            if (adapter != null) {
+                adapter.setItems(Collections.emptyList());
+                adapter.notifyDataSetChanged();
+            }
+            if (grid != null) grid.scrollToPosition(0);
+        } catch (Throwable t) {
+            Log.w(TAG, "resetGifUi: " + t);
+        }
     }
 
     /** AsyncTask to fetch GIF search results. */
@@ -405,10 +435,31 @@ public class GifSearchView extends LinearLayout {
             } catch (Throwable t) {
                 Log.e(TAG, "commitContent threw: " + t);
             }
-        Log.d(TAG, "commitContent returned=" + ok + " uri=" + uri);
-        if (!ok) {
-            Log.e(TAG, "Host rejected content or commit failed. Check MIME support and FileProvider authority.");
-        }
+            Log.d(TAG, "commitContent returned=" + ok + " uri=" + uri);
+            if (!ok) {
+                Log.e(TAG, "Host rejected content or commit failed. Check MIME support and FileProvider authority.");
+            }
+            // If commit succeeded, reset GIF UI and return to alphabet keyboard
+            if (ok) {
+                // clear search field and results
+                resetGifUi();
+                // hide GIF search view
+                GifSearchView.this.setVisibility(View.GONE);
+                // switch to alphabet (regular) keyboard
+                InputMethodService ims2 = getImeService();
+                if (ims2 != null) {
+                    try {
+                        // switch to main alphabet keyboard
+                        helium314.keyboard.keyboard.KeyboardSwitcher.getInstance().setAlphabetKeyboard();
+                    } catch (Throwable t) {
+                        Log.w(TAG, "Error switching to alphabet keyboard: " + t);
+                    }
+                }
+                // notify listener if any
+                if (actionsListener != null) {
+                    actionsListener.onGifInsertCompleted();
+                }
+            }
     }
 
     /**
