@@ -262,20 +262,27 @@ public final class EmojiPalettesView extends LinearLayout
         mEmojiCategory.initialize();
         mTabStrip = (LinearLayout) KeyboardSwitcher.getInstance().getEmojiTabStrip();
         if (Settings.getValues().mSecondaryStripVisible) {
+            // Add tabs for each emoji category
             for (final EmojiCategory.CategoryProperties properties : mEmojiCategory.getShownCategories()) {
                 addTab(mTabStrip, properties.mCategoryId);
             }
-            // Add GIF tab after emoji categories
-            mGifTab = new ImageView(getContext());
+            // Always add GIF tab, visibility will reflect preference and API key
+            android.content.Context ctx = getContext();
+            mGifTab = new ImageView(ctx);
             mColors.setBackground(mGifTab, ColorType.STRIP_BACKGROUND);
             mColors.setColor(mGifTab, ColorType.EMOJI_CATEGORY);
             mGifTab.setScaleType(ImageView.ScaleType.CENTER);
             mGifTab.setImageResource(R.drawable.ic_emoji_gif);
-            mGifTab.setContentDescription(getContext().getString(R.string.spoken_description_emoji_category_gif));
+            mGifTab.setContentDescription(ctx.getString(R.string.spoken_description_emoji_category_gif));
             mGifTab.setTag("GIF");
             mTabStrip.addView(mGifTab);
             mGifTab.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f));
             mGifTab.setOnClickListener(this);
+            // Initial visibility based on Tenor settings
+            String apiKey = helium314.keyboard.latin.GifPrefs.getStoredApiKey(ctx);
+            boolean showGif = helium314.keyboard.latin.GifPrefs.isTenorEnabled(ctx)
+                    && apiKey != null && !apiKey.trim().isEmpty();
+            mGifTab.setVisibility(showGif ? View.VISIBLE : View.GONE);
         }
 
         mPager = findViewById(R.id.emoji_pager);
@@ -398,6 +405,14 @@ public final class EmojiPalettesView extends LinearLayout
     public void startEmojiPalettes(final KeyVisualAttributes keyVisualAttr,
                final EditorInfo editorInfo, final KeyboardActionListener keyboardActionListener) {
         initialize();
+        // Adjust GIF tab visibility based on preference and API key
+        if (mGifTab != null) {
+            android.content.Context ctx = getContext();
+            String apiKey = helium314.keyboard.latin.GifPrefs.getStoredApiKey(ctx);
+            boolean showGif = helium314.keyboard.latin.GifPrefs.isTenorEnabled(ctx)
+                    && apiKey != null && !apiKey.trim().isEmpty();
+            mGifTab.setVisibility(showGif ? View.VISIBLE : View.GONE);
+        }
 
         setupBottomRowKeyboard(editorInfo, keyboardActionListener);
         final KeyDrawParams params = new KeyDrawParams();

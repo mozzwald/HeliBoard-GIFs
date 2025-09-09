@@ -39,7 +39,8 @@ fun MainSettingsScreen(
     onClickLanguage: () -> Unit,
     onClickLayouts: () -> Unit,
     onClickDictionaries: () -> Unit,
-    onClickBack: () -> Unit,
+    onClickGifSettings: () -> Unit,
+    onClickBack: () -> Unit = {},
 ) {
     SearchSettingsScreen(
         onClickBack = onClickBack,
@@ -93,6 +94,12 @@ fun MainSettingsScreen(
                     onClick = onClickDictionaries,
                     icon = R.drawable.ic_dictionary
                 ) { NextScreenIcon() }
+                // Tenor GIF settings
+                Preference(
+                    name = stringResource(R.string.settings_screen_gif_tenor),
+                    onClick = onClickGifSettings,
+                    icon = R.drawable.ic_emoji_gif
+                ) { NextScreenIcon() }
                 Preference(
                     name = stringResource(R.string.settings_screen_advanced),
                     onClick = onClickAdvanced,
@@ -114,7 +121,7 @@ private fun PreviewScreen() {
     initPreview(LocalContext.current)
     Theme(previewDark) {
         Surface {
-            MainSettingsScreen({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {})
+            MainSettingsScreen({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {})
         }
     }
 }

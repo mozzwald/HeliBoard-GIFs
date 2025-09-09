@@ -41,6 +41,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun SettingsNavHost(
     onClickBack: () -> Unit,
+    onClickGifSettings: () -> Unit,
     startDestination: String? = null,
 ) {
     val navController = rememberNavController()
@@ -75,6 +76,7 @@ fun SettingsNavHost(
                 onClickLanguage = { navController.navigate(SettingsDestination.Languages) },
                 onClickLayouts = { navController.navigate(SettingsDestination.Layouts) },
                 onClickDictionaries = { navController.navigate(SettingsDestination.Dictionaries) },
+                onClickGifSettings = onClickGifSettings,
                 onClickBack = ::goBack,
             )
         }

@@ -18,9 +18,12 @@ import androidx.recyclerview.widget.RecyclerView;
 
 import helium314.keyboard.latin.R;
 import helium314.keyboard.latin.GifConfig;
+import helium314.keyboard.latin.GifPrefs;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
+import android.content.Context;
+import android.widget.Toast;
 import java.io.BufferedInputStream;
 import java.io.BufferedReader;
 import java.io.File;
@@ -77,16 +80,6 @@ public class GifSearchView extends LinearLayout {
     private volatile boolean hasMore = true;
     @Nullable private String nextPos = null;
     @Nullable private String currentQuery = null;
-    /**
-     * Load the next page of GIF results using Tenor v2 pagination cursor.
-     */
-    private void loadNextPage() {
-        if (isLoading || !hasMore) return;
-        if (currentQuery == null || currentQuery.isEmpty()) return;
-        if (nextPos == null || nextPos.isEmpty()) { hasMore = false; return; }
-        isLoading = true;
-        new FetchGifTask().execute(currentQuery, nextPos);
-    }
     private ImageButton clearButton;
     // Helpers for editing state
     public boolean hasResults() {
@@ -252,6 +245,18 @@ public class GifSearchView extends LinearLayout {
     /** Perform a GIF search using Tenor API. */
     public void performSearch(String query) {
         if (query == null || query.isEmpty()) return;
+        // Check Tenor enabled and API key
+        Context ctx = getContext();
+        if (!helium314.keyboard.latin.GifPrefs.isTenorEnabled(ctx)) {
+            Toast.makeText(ctx, "Enable Tenor in Settings to search GIFs", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        String key = GifConfig.getTenorApiKey(ctx);
+        if (key == null || key.isEmpty()) {
+            Toast.makeText(ctx, "Add your Tenor API key in Settings", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        Log.d(TAG, "Tenor enabled; using API key length=" + key.length());
         // Reset pagination state for new search
         currentQuery = query;
         isLoading = false;
@@ -261,6 +266,16 @@ public class GifSearchView extends LinearLayout {
         adapter.notifyDataSetChanged();
         if (actionsListener != null) actionsListener.onGifEditingStateChanged(true);
         new FetchGifTask().execute(query);
+    }
+    /**
+     * Load next page of GIF results (pagination).
+     */
+    public void loadNextPage() {
+        if (isLoading || !hasMore) return;
+        if (currentQuery == null || currentQuery.isEmpty()) return;
+        if (nextPos == null || nextPos.isEmpty()) { hasMore = false; return; }
+        isLoading = true;
+        new FetchGifTask().execute(currentQuery, nextPos);
     }
     /**
      * Listener to notify when GIF actions occur.
@@ -317,7 +332,17 @@ public class GifSearchView extends LinearLayout {
             List<GifItem> list = new ArrayList<>();
             HttpURLConnection conn = null;
             try {
-                String key = GifConfig.getTenorApiKey();
+                // Check Tenor enabled and fetch API key
+                Context ctx = getContext();
+                if (!helium314.keyboard.latin.GifPrefs.isTenorEnabled(ctx)) {
+                    Log.d(TAG, "Tenor disabled in settings");
+                    return list;
+                }
+                String key = GifConfig.getTenorApiKey(ctx);
+                if (key == null || key.isEmpty()) {
+                    Log.d(TAG, "No Tenor API key provided");
+                    return list;
+                }
                 String encodedKey = URLEncoder.encode(key, StandardCharsets.UTF_8.name());
                 String encodedQ = URLEncoder.encode(q, StandardCharsets.UTF_8.name());
                 StringBuilder sbUrl = new StringBuilder(

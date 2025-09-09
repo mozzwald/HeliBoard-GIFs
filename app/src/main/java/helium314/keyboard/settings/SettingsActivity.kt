@@ -2,7 +2,6 @@
 package helium314.keyboard.settings
 
 import android.content.Context
-import android.content.Intent
 import android.content.SharedPreferences
 import android.net.Uri
 import android.os.Bundle
@@ -10,6 +9,8 @@ import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import androidx.activity.ComponentActivity
 import androidx.activity.enableEdgeToEdge
+// Use fully-qualified android.content.Intent to avoid ambiguous imports
+import helium314.keyboard.latin.TenorSettingsActivity
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.padding
@@ -116,7 +117,12 @@ class SettingsActivity : ComponentActivity(), SharedPreferences.OnSharedPreferen
                             }
                         }
                     else {
-                        SettingsNavHost(onClickBack = { this.finish() })
+                        SettingsNavHost(
+                            onClickBack = { this.finish() },
+                            onClickGifSettings = { startActivity(
+                                android.content.Intent(this, TenorSettingsActivity::class.java)
+                            ) }
+                        )
                         if (showWelcomeWizard) {
                             WelcomeWizard(close = { showWelcomeWizard = false }, finish = this::finish)
                         } else if (crashReports.isNotEmpty()) {
@@ -127,9 +133,9 @@ class SettingsActivity : ComponentActivity(), SharedPreferences.OnSharedPreferen
                                 onNeutral = { crashReports.forEach { it.delete() }; crashReportFiles.value = emptyList() },
                                 confirmButtonText = "get",
                                 onConfirmed = {
-                                    val intent = Intent(Intent.ACTION_CREATE_DOCUMENT)
-                                    intent.addCategory(Intent.CATEGORY_OPENABLE)
-                                    intent.putExtra(Intent.EXTRA_TITLE, "crash_reports.zip")
+                                    val intent = android.content.Intent(android.content.Intent.ACTION_CREATE_DOCUMENT)
+                                    intent.addCategory(android.content.Intent.CATEGORY_OPENABLE)
+                                    intent.putExtra(android.content.Intent.EXTRA_TITLE, "crash_reports.zip")
                                     intent.setType("application/zip")
                                     crashFilePicker.launch(intent)
                                 },
@@ -148,7 +154,7 @@ class SettingsActivity : ComponentActivity(), SharedPreferences.OnSharedPreferen
             }
         }
 
-        if (intent?.action == Intent.ACTION_VIEW) {
+        if (intent?.action == android.content.Intent.ACTION_VIEW) {
             intent?.data?.let {
                 cachedDictionaryFile.delete()
                 FileUtils.copyContentUriToNewFile(it, this, cachedDictionaryFile)

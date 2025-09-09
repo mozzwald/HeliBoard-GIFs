@@ -119,6 +119,7 @@ android {
 dependencies {
     // androidx
     implementation("androidx.core:core-ktx:1.16.0")
+    implementation("androidx.appcompat:appcompat:1.6.1")
     implementation("androidx.recyclerview:recyclerview:1.4.0")
     implementation("androidx.autofill:autofill:1.1.0")
     implementation("androidx.viewpager2:viewpager2:1.1.0")
