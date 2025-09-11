@@ -8,6 +8,7 @@ import android.view.MotionEvent;
 import android.view.GestureDetector;
 import android.view.GestureDetector.SimpleOnGestureListener;
 import android.util.Log;
+import android.util.DisplayMetrics;
 import android.view.inputmethod.EditorInfo;
 import android.widget.EditText;
 import android.widget.ImageButton;
@@ -218,15 +219,50 @@ public class GifSearchView extends LinearLayout {
         });
     }
 
-    @Override
+/*    @Override
     protected void onAttachedToWindow() {
         super.onAttachedToWindow();
-        // Constrain the panel to a compact height so it sits above the main keyboard
-        int strip = getResources().getDimensionPixelSize(R.dimen.config_suggestions_strip_height);
+        // Set GIF results window to 70% of the screen height
         ViewGroup.LayoutParams lp = getLayoutParams();
         if (lp != null) {
-            lp.height = strip * 4; // search row + a few rows of results
+            final int screenH = getResources().getDisplayMetrics().heightPixels;
+            lp.height = (int) (screenH * 0.70f);
             setLayoutParams(lp);
+        }
+    }
+*/
+
+    private int getMaxGifHeightPx() {
+        final DisplayMetrics dm = getResources().getDisplayMetrics();
+        return (int) (dm.heightPixels * 0.70f); // 70% of screen
+    }
+
+    @Override
+    protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+        // First, measure normally but don’t allow the parent to push an absurd height.
+        final int maxH = getMaxGifHeightPx();
+        final int parentMode = MeasureSpec.getMode(heightMeasureSpec);
+        final int parentSize = MeasureSpec.getSize(heightMeasureSpec);
+
+        // Build a capped spec for the first pass
+        int cappedSize = parentSize > 0 ? Math.min(parentSize, maxH) : maxH;
+        int cappedSpec;
+        if (parentMode == MeasureSpec.EXACTLY) {
+            // Parent demands EXACT height; honor but cap it.
+            cappedSpec = MeasureSpec.makeMeasureSpec(cappedSize, MeasureSpec.EXACTLY);
+        } else if (parentMode == MeasureSpec.AT_MOST) {
+            // Parent allows up to X; reduce X to our cap.
+            cappedSpec = MeasureSpec.makeMeasureSpec(Math.min(parentSize, maxH), MeasureSpec.AT_MOST);
+        } else {
+            // UNSPECIFIED: pick at most our cap.
+            cappedSpec = MeasureSpec.makeMeasureSpec(maxH, MeasureSpec.AT_MOST);
+        }
+
+        super.onMeasure(widthMeasureSpec, cappedSpec);
+
+        // Safety: if children asked for more than cap, force exactly cap.
+        if (getMeasuredHeight() > maxH) {
+            super.onMeasure(widthMeasureSpec, MeasureSpec.makeMeasureSpec(maxH, MeasureSpec.EXACTLY));
         }
     }
 
