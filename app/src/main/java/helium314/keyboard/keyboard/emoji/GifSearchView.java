@@ -64,6 +64,21 @@ import android.content.ClipData;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 
+import android.os.Build;
+import android.provider.MediaStore;
+import android.content.ContentResolver;
+import android.content.ContentValues;
+import android.content.ActivityNotFoundException;
+import android.net.Uri;
+import android.content.ClipData;
+import android.content.Intent;
+
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.io.FileInputStream;
+import java.io.File;
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 /**
  * A view for searching and displaying GIFs.
  */
@@ -569,6 +584,111 @@ public class GifSearchView extends LinearLayout {
         @Override protected void onPostExecute(Bitmap bm) { if (bm != null) iv.setImageBitmap(bm); }
     }
 
+    /* Persist to MediaStore (Android 10+) and return a shareable Uri */
+    @Nullable
+    private static Uri persistForSharing(@NonNull Context ctx,
+                                        @NonNull File srcFile,
+                                        @NonNull String displayName,
+                                        @NonNull String mimeType) {
+        try {
+            final ContentResolver cr = ctx.getContentResolver();
+            final boolean isGif = "image/gif".equalsIgnoreCase(mimeType);
+            final Uri external;
+            final ContentValues cv = new ContentValues();
+
+            if (Build.VERSION.SDK_INT >= 29) {
+                // Prefer Pictures/HeliBoard (or Downloads). Pictures integrates better with SMS galleries.
+                external = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY);
+                cv.put(MediaStore.Images.Media.DISPLAY_NAME, displayName);
+                cv.put(MediaStore.Images.Media.MIME_TYPE, mimeType);
+                cv.put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/HeliBoard");
+                cv.put(MediaStore.MediaColumns.IS_PENDING, 1);
+            } else {
+                // Pre-Android 10: fall back to FileProvider Uri (return null here to signal FP path).
+                return null;
+            }
+
+            Uri dst = cr.insert(external, cv);
+            if (dst == null) return null;
+
+            try (InputStream in = new FileInputStream(srcFile);
+                OutputStream out = cr.openOutputStream(dst, "w")) {
+                if (out == null) return null;
+                byte[] buf = new byte[8192];
+                int n;
+                while ((n = in.read(buf)) >= 0) out.write(buf, 0, n);
+            }
+
+            if (Build.VERSION.SDK_INT >= 29) {
+                cv.clear();
+                cv.put(MediaStore.MediaColumns.IS_PENDING, 0);
+                cr.update(dst, cv, null, null);
+            }
+            return dst;
+        } catch (Throwable t) {
+            Log.e(TAG, "persistForSharing failed", t);
+            return null;
+        }
+    }
+
+    /* Build and launch ACTION_SEND that SMS apps accept */
+    private void shareGifFallback(@NonNull Context context,
+                                @NonNull Uri fileProviderUri, // your current FP uri
+                                @NonNull File localFile,
+                                @NonNull String mimeType,     // "image/gif" or "image/webp" etc.
+                                @NonNull String displayName) {
+        Uri shareUri = null;
+
+        // Try MediaStore (Android 10+) for maximum compatibility
+        shareUri = persistForSharing(context, localFile, displayName, mimeType);
+
+        if (shareUri == null) {
+            // Fall back to FileProvider uri
+            shareUri = fileProviderUri;
+        }
+
+        Intent send = new Intent(Intent.ACTION_SEND);
+        send.setType(mimeType);
+        send.putExtra(Intent.EXTRA_STREAM, shareUri);
+        send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+
+        // Also set ClipData so all targets see the read grant
+        try {
+            ClipData cd = ClipData.newUri(context.getContentResolver(), displayName, shareUri);
+            send.setClipData(cd);
+        } catch (Throwable ignored) {}
+
+        // Prefer default SMS app if available (avoid "contact shortcuts" that drop streams)
+        String smsPkg = null;
+        try {
+            smsPkg = android.provider.Telephony.Sms.getDefaultSmsPackage(context);
+        } catch (Throwable ignored) {}
+        if (smsPkg != null) {
+            send.setPackage(smsPkg);
+        }
+
+        // Grant explicit permission to the target package if we set one
+        if (smsPkg != null) {
+            try {
+                context.grantUriPermission(smsPkg, shareUri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            } catch (Throwable ignored) {}
+        }
+
+        try {
+            // If we forced SMS package and it’s present, start directly; else show chooser
+            if (smsPkg != null) {
+                context.startActivity(send);
+            } else {
+                Intent chooser = Intent.createChooser(send, "Share GIF");
+                chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                context.startActivity(chooser);
+            }
+        } catch (ActivityNotFoundException e) {
+            Log.e(TAG, "No activity found for ACTION_SEND", e);
+            Toast.makeText(context, "No app available to share GIF", Toast.LENGTH_SHORT).show();
+        }
+    }
+
     /** Downloads the full GIF and commits to the editor. */
     private class DownloadAndSendTask extends AsyncTask<GifItem, Void, Uri> {
         private final GifItem item;
@@ -606,7 +726,9 @@ public class GifSearchView extends LinearLayout {
                 return null;
             }
         }
-        @Override protected void onPostExecute(Uri uri) {
+
+        @Override
+        protected void onPostExecute(Uri uri) {
             if (uri == null) {
                 Log.e(TAG, "Insert aborted: uri is null");
                 return;
@@ -627,20 +749,63 @@ public class GifSearchView extends LinearLayout {
             } catch (Throwable t) {
                 Log.w(TAG, "finishComposingText failed: " + t);
             }
+
+            // Gather editor-declared MIME types (may be empty even if the app supports images via its own UI)
             String[] mimes = androidx.core.view.inputmethod.EditorInfoCompat.getContentMimeTypes(ei);
+            boolean noRichContent = (mimes == null || mimes.length == 0);
             boolean supportsGif = false;
-            if (mimes != null) {
+            if (!noRichContent) {
                 StringBuilder sb = new StringBuilder();
                 for (String m : mimes) {
-                    sb.append(m).append(" ");
-                    if (ClipDescription.compareMimeTypes(m, "image/gif")) supportsGif = true;
+                    sb.append(m).append(' ');
+                    Log.d(TAG, "Editor supports MIME: " + m);
+                    if (ClipDescription.compareMimeTypes(m, "image/gif")) {
+                        supportsGif = true;
+                    }
                 }
                 Log.d(TAG, "Editor supports MIME(s): " + sb.toString().trim());
             } else {
-                Log.d(TAG, "Editor has no declared content MIME types");
+                Log.d(TAG, "Editor has no declared content MIME types (commitContent likely unsupported)");
             }
-            String authority = getContext().getPackageName() + ".fileprovider";
-            // Try GIF first
+
+            final String authority = getContext().getPackageName() + ".fileprovider";
+            final File gifFile = new File(getContext().getCacheDir(), "tenor_gifs/" + item.id + ".gif");
+
+            // If the editor does not declare any rich content MIME types, skip commit and SHARE directly
+            if (noRichContent) {
+                if (gifFile.exists()) {
+                    Uri shareGif = FileProvider.getUriForFile(getContext(), authority, gifFile);
+                    Log.d(TAG, "Falling back to ACTION_SEND (no MIME types declared) with GIF");
+                    shareGifFallback(
+                            getContext().getApplicationContext(),
+                            shareGif,
+                            gifFile,
+                            "image/gif",
+                            item.id + ".gif"
+                    );
+                    return;
+                } else {
+                    // Try PNG first-frame if GIF file missing for any reason
+                    File pngFile = convertGifToPngFirstFrame(gifFile);
+                    if (pngFile != null && pngFile.exists()) {
+                        Uri sharePng = FileProvider.getUriForFile(getContext(), authority, pngFile);
+                        Log.d(TAG, "Falling back to ACTION_SEND (no MIME types declared) with PNG");
+                        shareGifFallback(
+                                getContext().getApplicationContext(),
+                                sharePng,
+                                pngFile,
+                                "image/png",
+                                item.id + ".png"
+                        );
+                        return;
+                    }
+                    Log.e(TAG, "Share aborted: no file to share");
+                    Toast.makeText(getContext(), "This app doesn't accept images from the keyboard", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+            }
+
+            // Try commitContent with GIF first
             if (tryCommit(ic, ei, uri, "image/gif")) {
                 resetGifUi();
                 GifSearchView.this.setVisibility(View.GONE);
@@ -657,8 +822,8 @@ public class GifSearchView extends LinearLayout {
                 }
                 return;
             }
+
             // Try static PNG first frame
-            File gifFile = new File(getContext().getCacheDir(), "tenor_gifs/" + item.id + ".gif");
             File pngFile = convertGifToPngFirstFrame(gifFile);
             if (pngFile != null) {
                 Uri pngUri = FileProvider.getUriForFile(getContext(), authority, pngFile);
@@ -679,24 +844,35 @@ public class GifSearchView extends LinearLayout {
                     return;
                 }
             }
-            // All commitContent attempts failed; fallback to Share sheet
-            // Prefer sharing the original GIF
-            File gifFileShare = new File(getContext().getCacheDir(), "tenor_gifs/" + item.id + ".gif");
-            if (gifFileShare.exists()) {
-                Uri shareGif = FileProvider.getUriForFile(getContext(), authority, gifFileShare);
-                Log.d(TAG, "Falling back to Share sheet with GIF");
-                launchShareSheet(shareGif, "image/gif");
+
+            // All commitContent attempts failed; use ACTION_SEND fallback (more reliable for SMS)
+            if (gifFile.exists()) {
+                Uri shareGif = FileProvider.getUriForFile(getContext(), authority, gifFile);
+                Log.d(TAG, "commitContent failed; falling back to ACTION_SEND with GIF");
+                shareGifFallback(
+                        getContext().getApplicationContext(),
+                        shareGif,
+                        gifFile,
+                        "image/gif",
+                        item.id + ".gif"
+                );
                 return;
             } else if (pngFile != null && pngFile.exists()) {
                 Uri sharePng = FileProvider.getUriForFile(getContext(), authority, pngFile);
-                Log.d(TAG, "Falling back to Share sheet with PNG");
-                launchShareSheet(sharePng, "image/png");
+                Log.d(TAG, "commitContent failed; falling back to ACTION_SEND with PNG");
+                shareGifFallback(
+                        getContext().getApplicationContext(),
+                        sharePng,
+                        pngFile,
+                        "image/png",
+                        item.id + ".png"
+                );
                 return;
             } else {
                 Log.e(TAG, "All commit and share fallbacks failed; no file to share");
                 Toast.makeText(getContext(), "This app doesn't accept images from the keyboard", Toast.LENGTH_SHORT).show();
             }
-    }
+        }
 
     /**
      * Resolve the hosting InputMethodService by traversing the context chain.
