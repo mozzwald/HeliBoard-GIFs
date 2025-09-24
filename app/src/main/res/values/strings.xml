@@ -915,4 +915,11 @@ New dictionary:
     <string name="settings_screen_gif_tenor">GIF (Tenor)</string>
     <!-- Header for Tenor GIF settings page -->
     <string name="tenor_gif_options">Tenor GIF Options</string>
+    <!-- GIF share size preference strings -->
+    <string name="gif_share_size">GIF Share Size</string>
+    <string name="gif_share_size_auto">Auto (fit MMS)</string>
+    <string name="gif_share_size_tiny">Tiny GIF</string>
+    <string name="gif_share_size_medium">Medium GIF</string>
+    <string name="gif_share_size_original">Original GIF</string>
+
 </resources>

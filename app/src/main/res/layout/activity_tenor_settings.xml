@@ -52,5 +52,18 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="@string/get_tenor_api_key" />
+        <!-- Preference for controlling the size of GIFs when sharing -->
+        <TextView
+            android:id="@+id/text_gif_share_size_label"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/gif_share_size"
+            android:paddingTop="16dp"
+            android:textColor="?android:attr/textColorPrimary"
+            android:textStyle="bold" />
+        <Spinner
+            android:id="@+id/spinner_gif_share_size"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
     </LinearLayout>
 </ScrollView>

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Entries for GIF share size preference -->
+    <string-array name="gif_share_size_entries">
+        <item>@string/gif_share_size_auto</item>
+        <item>@string/gif_share_size_tiny</item>
+        <item>@string/gif_share_size_medium</item>
+        <item>@string/gif_share_size_original</item>
+    </string-array>
+    <!-- Corresponding values saved in preferences -->
+    <string-array name="gif_share_size_values">
+        <item>auto</item>
+        <item>tinygif</item>
+        <item>mediumgif</item>
+        <item>gif</item>
+    </string-array>
+</resources>

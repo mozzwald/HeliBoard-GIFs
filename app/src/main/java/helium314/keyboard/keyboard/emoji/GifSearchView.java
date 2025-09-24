@@ -83,6 +83,35 @@ import androidx.annotation.Nullable;
  * A view for searching and displaying GIFs.
  */
 public class GifSearchView extends LinearLayout {
+    // MMS size cap settings
+    private static final int DEFAULT_MMS_CAP_BYTES = 600 * 1024; // 600 KB
+    private static final int FALLBACK_MIN_CAP_BYTES = 300 * 1024; // 300 KB
+
+    /**
+     * Retrieves the MMS max message size from CarrierConfig if available,
+     * otherwise returns a conservative default.
+     */
+    private int getMmsMaxBytes(Context ctx) {
+        try {
+            android.telephony.SubscriptionManager sm = android.telephony.SubscriptionManager.from(ctx);
+            int subId = android.telephony.SubscriptionManager.getDefaultSubscriptionId();
+            if (sm != null && android.telephony.SubscriptionManager.isValidSubscriptionId(subId)) {
+                android.telephony.CarrierConfigManager ccm =
+                        (android.telephony.CarrierConfigManager) ctx.getSystemService(Context.CARRIER_CONFIG_SERVICE);
+                if (ccm != null) {
+                    android.os.PersistableBundle b = ccm.getConfigForSubId(subId);
+                    if (b != null) {
+                        int v = b.getInt(android.telephony.CarrierConfigManager.KEY_MMS_MAX_MESSAGE_SIZE_INT,
+                                DEFAULT_MMS_CAP_BYTES);
+                        if (v >= FALLBACK_MIN_CAP_BYTES && v < (10 * 1024 * 1024)) {
+                            return v;
+                        }
+                    }
+                }
+            }
+        } catch (Throwable ignored) {}
+        return DEFAULT_MMS_CAP_BYTES;
+    }
     private static final String TAG = "GifSearchView";
     private EditText queryField;
     private ImageButton searchButton;
@@ -399,7 +428,7 @@ public class GifSearchView extends LinearLayout {
                 StringBuilder sbUrl = new StringBuilder(
                         "https://tenor.googleapis.com/v2/search?key=" + encodedKey
                         + "&q=" + encodedQ
-                        + "&limit=25&media_filter=gif,tinygif&client_key=HeliBoard");
+                        + "&limit=25&media_filter=tinygif,mediumgif,gif&client_key=HeliBoard");
                 if (pos != null && !pos.isEmpty()) {
                     sbUrl.append("&pos=").append(URLEncoder.encode(pos, StandardCharsets.UTF_8.name()));
                 }
@@ -434,15 +463,45 @@ public class GifSearchView extends LinearLayout {
                         String id = item.optString("id");
                         JSONObject media = item.optJSONObject("media_formats");
                         if (media != null) {
-                            JSONObject tiny = media.optJSONObject("tinygif");
-                            if (tiny == null) {
-                                tiny = media.optJSONObject("nanogif");
+                            java.util.Map<String, MediaMeta> formats = new java.util.HashMap<>();
+                            // tinygif or nanogif
+                            JSONObject tinyObj = media.optJSONObject("tinygif");
+                            if (tinyObj == null) tinyObj = media.optJSONObject("nanogif");
+                            if (tinyObj != null) {
+                                String url = tinyObj.optString("url");
+                                long size = tinyObj.optLong("size", -1);
+                                formats.put("tinygif", new MediaMeta(url, size));
                             }
-                            JSONObject full = media.optJSONObject("gif");
-                            if (tiny != null && full != null) {
-                                String preview = tiny.optString("url");
-                                String fullUrl = full.optString("url");
-                                list.add(new GifItem(id, preview, fullUrl));
+                            // mediumgif
+                            JSONObject mediumObj = media.optJSONObject("mediumgif");
+                            if (mediumObj != null) {
+                                String url = mediumObj.optString("url");
+                                long size = mediumObj.optLong("size", -1);
+                                formats.put("mediumgif", new MediaMeta(url, size));
+                            }
+                            // full gif
+                            JSONObject fullObj = media.optJSONObject("gif");
+                            if (fullObj != null) {
+                                String url = fullObj.optString("url");
+                                long size = fullObj.optLong("size", -1);
+                                formats.put("gif", new MediaMeta(url, size));
+                            }
+                            // mp4
+                            JSONObject mp4Obj = media.optJSONObject("mp4");
+                            if (mp4Obj != null) {
+                                String url = mp4Obj.optString("url");
+                                long size = mp4Obj.optLong("size", -1);
+                                formats.put("mp4", new MediaMeta(url, size));
+                            }
+                            // tinymp4
+                            JSONObject tinyMp4Obj = media.optJSONObject("tinymp4");
+                            if (tinyMp4Obj != null) {
+                                String url = tinyMp4Obj.optString("url");
+                                long size = tinyMp4Obj.optLong("size", -1);
+                                formats.put("tinymp4", new MediaMeta(url, size));
+                            }
+                            if (!formats.isEmpty()) {
+                                list.add(new GifItem(id, formats));
                             }
                         }
                     }
@@ -483,9 +542,24 @@ public class GifSearchView extends LinearLayout {
 
     /** Model for GIF item. */
     private static class GifItem {
-        final String id, previewUrl, fullUrl;
-        GifItem(String id, String previewUrl, String fullUrl) {
-            this.id = id; this.previewUrl = previewUrl; this.fullUrl = fullUrl;
+        final String id;
+        final java.util.Map<String, MediaMeta> formats;
+        GifItem(String id, java.util.Map<String, MediaMeta> formats) {
+            this.id = id;
+            this.formats = formats;
+        }
+        String getPreviewUrl() {
+            MediaMeta m = formats.get("tinygif");
+            if (m == null) m = formats.get("nanogif");
+            return (m != null) ? m.url : null;
+        }
+        String getMediumUrl() {
+            MediaMeta m = formats.get("mediumgif");
+            return (m != null) ? m.url : null;
+        }
+        String getFullUrl() {
+            MediaMeta m = formats.get("gif");
+            return (m != null) ? m.url : null;
         }
     }
 
@@ -540,13 +614,14 @@ public class GifSearchView extends LinearLayout {
             Glide.with(holder.image).clear(holder.image);
             // Load animated tiny GIF preview
             glide.asGif()
-                 .load(item.previewUrl)
+                 .load(item.getPreviewUrl())
                  .diskCacheStrategy(DiskCacheStrategy.AUTOMATIC)
                  .transition(DrawableTransitionOptions.withCrossFade())
                  .centerCrop()
                  .into(holder.image);
             holder.image.setOnClickListener(v -> {
-                Log.d(TAG, "thumbnail onClick id=" + item.id + " fullUrl=" + item.fullUrl);
+                String fullUrl = item.getFullUrl();
+                Log.d(TAG, "thumbnail onClick id=" + item.id + " fullUrl=" + fullUrl);
                 new DownloadAndSendTask(item).execute(item);
             });
         }
@@ -689,37 +764,127 @@ public class GifSearchView extends LinearLayout {
         }
     }
 
+    // Data holder for media variant metadata
+    private static class MediaMeta {
+        final String url;
+        final long sizeBytes;
+        MediaMeta(String url, long sizeBytes) {
+            this.url = url;
+            this.sizeBytes = sizeBytes;
+        }
+    }
+    // Candidate choice for auto MMS fitting
+    private static class MediaChoice {
+        String url;
+        String mime;
+        String label;
+        long declaredBytes;
+    }
+
+    /** Selects the best media variant fitting within capBytes, prioritizing GIF then MP4. */
+    private MediaChoice chooseBestForMmsCap(java.util.Map<String, MediaMeta> formats, int capBytes) {
+        java.util.List<MediaChoice> candidates = new java.util.ArrayList<>();
+        addIfPresent(candidates, formats, "gif", "image/gif");
+        addIfPresent(candidates, formats, "mediumgif", "image/gif");
+        addIfPresent(candidates, formats, "tinygif", "image/gif");
+        addIfPresent(candidates, formats, "mp4", "video/mp4");
+        addIfPresent(candidates, formats, "tinymp4", "video/mp4");
+        MediaChoice bestKnown = null;
+        for (MediaChoice c : candidates) {
+            if (c.declaredBytes >= 0 && c.declaredBytes <= capBytes) {
+                if (bestKnown == null || c.declaredBytes > bestKnown.declaredBytes) bestKnown = c;
+            }
+        }
+        if (bestKnown != null) return bestKnown;
+        MediaChoice smallestKnown = null;
+        for (MediaChoice c : candidates) {
+            if (c.declaredBytes > 0) {
+                if (smallestKnown == null || c.declaredBytes < smallestKnown.declaredBytes) smallestKnown = c;
+            }
+        }
+        if (smallestKnown != null) return smallestKnown;
+        return candidates.isEmpty() ? null : candidates.get(0);
+    }
+
+    private void addIfPresent(java.util.List<MediaChoice> out, java.util.Map<String, MediaMeta> formats,
+                              String key, String mime) {
+        MediaMeta m = formats.get(key);
+        if (m != null && m.url != null && !m.url.isEmpty()) {
+            MediaChoice c = new MediaChoice();
+            c.url = m.url;
+            c.mime = mime;
+            c.label = key;
+            c.declaredBytes = m.sizeBytes >= 0 ? m.sizeBytes : -1;
+            out.add(c);
+        }
+    }
+
     /** Downloads the full GIF and commits to the editor. */
     private class DownloadAndSendTask extends AsyncTask<GifItem, Void, Uri> {
         private final GifItem item;
         DownloadAndSendTask(GifItem item) { this.item = item; }
         @Override protected Uri doInBackground(GifItem... params) {
             try {
+                // Determine which variant to download based on share settings
+                GifItem item = params[0];
+                String shareSize = helium314.keyboard.latin.GifPrefs.getShareSize(getContext());
+                String urlToFetch;
+                String mimeType;
+                String displayExt;
+                if ("auto".equals(shareSize)) {
+                    int cap = getMmsMaxBytes(getContext());
+                    MediaChoice choice = chooseBestForMmsCap(item.formats, cap);
+                    if (choice != null) {
+                        urlToFetch = choice.url;
+                        mimeType = choice.mime;
+                        displayExt = choice.mime.startsWith("image/") ? ".gif" : ".mp4";
+                        Log.d(TAG, "MMS cap=" + cap + " chosen=" + choice.label + " declared=" + choice.declaredBytes);
+                    } else {
+                        urlToFetch = item.getFullUrl();
+                        mimeType = "image/gif";
+                        displayExt = ".gif";
+                    }
+                } else if ("tinygif".equals(shareSize)) {
+                    urlToFetch = item.getPreviewUrl();
+                    mimeType = "image/gif";
+                    displayExt = ".gif";
+                } else if ("mediumgif".equals(shareSize)) {
+                    urlToFetch = item.getMediumUrl();
+                    mimeType = "image/gif";
+                    displayExt = ".gif";
+                } else {
+                    // default to full gif
+                    urlToFetch = item.getFullUrl();
+                    mimeType = "image/gif";
+                    displayExt = ".gif";
+                }
                 File dir = new File(getContext().getCacheDir(), "tenor_gifs");
                 if (!dir.exists() && !dir.mkdirs()) {
                     Log.e(TAG, "Failed to create cache directory: " + dir.getAbsolutePath());
                 }
-                File out = new File(dir, item.id + ".gif");
+                // Download the chosen variant
+                File out = new File(dir, item.id + displayExt);
                 if (!out.exists()) {
-                    HttpURLConnection conn = (HttpURLConnection)
-                            new URL(item.fullUrl).openConnection();
+                    HttpURLConnection conn = (HttpURLConnection) new URL(urlToFetch).openConnection();
                     conn.setConnectTimeout(10000);
                     conn.setReadTimeout(15000);
                     conn.connect();
-                    InputStream is = conn.getInputStream();
-                    FileOutputStream fos = new FileOutputStream(out);
-                    byte[] buf = new byte[4096]; int r;
-                    while ((r = is.read(buf)) > 0) fos.write(buf, 0, r);
-                    fos.close(); is.close(); conn.disconnect();
+                    try (InputStream is = conn.getInputStream();
+                         FileOutputStream fos = new FileOutputStream(out)) {
+                        byte[] buf = new byte[4096];
+                        int r;
+                        while ((r = is.read(buf)) > 0) fos.write(buf, 0, r);
+                    }
+                    conn.disconnect();
                 }
                 long size = out.length();
-                Log.d(TAG, "Saved GIF file " + out.getAbsolutePath() + " size=" + size + " bytes");
+                Log.d(TAG, "Downloaded bytes=" + size);
                 if (size <= 0) {
-                    Log.e(TAG, "Downloaded GIF is empty, aborting insert");
+                    Log.e(TAG, "Downloaded file empty, aborting insert");
                     return null;
                 }
+                // Share via FileProvider
                 String authority = getContext().getPackageName() + ".fileprovider";
-                Log.d(TAG, "Using FileProvider authority=" + authority);
                 return FileProvider.getUriForFile(getContext(), authority, out);
             } catch (Exception e) {
                 Log.e(TAG, "doInBackground error downloading GIF: " + e);
