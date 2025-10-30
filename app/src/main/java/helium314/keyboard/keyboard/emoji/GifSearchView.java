@@ -16,6 +16,7 @@ import android.widget.LinearLayout;
 
 import androidx.recyclerview.widget.GridLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
+import androidx.recyclerview.widget.StaggeredGridLayoutManager;
 
 import helium314.keyboard.latin.R;
 import helium314.keyboard.latin.GifConfig;
@@ -118,7 +119,7 @@ public class GifSearchView extends LinearLayout {
     private RecyclerView grid;
     private GifAdapter adapter;
     private GifActionsListener actionsListener;
-    private GridLayoutManager layoutManager;
+    private StaggeredGridLayoutManager layoutManager;
     private RequestManager glide;
     // Pagination state for endless scrolling
     private volatile boolean isLoading = false;
@@ -171,7 +172,8 @@ public class GifSearchView extends LinearLayout {
         grid = findViewById(R.id.gif_results_grid);
         // Setup Glide for animated previews
         glide = Glide.with(this);
-        grid.setHasFixedSize(true);
+        // Mixed-height rows need dynamic measurement
+        grid.setHasFixedSize(false);
         grid.setItemViewCacheSize(20);
         grid.addOnScrollListener(new RecyclerView.OnScrollListener() {
             @Override public void onScrollStateChanged(RecyclerView rv, int newState) {
@@ -188,10 +190,13 @@ public class GifSearchView extends LinearLayout {
                 if (dy <= 0) return; // only down
                 if (isLoading || !hasMore) return;
                 RecyclerView.LayoutManager lm = rv.getLayoutManager();
-                if (!(lm instanceof GridLayoutManager)) return;
-                GridLayoutManager glm = (GridLayoutManager) lm;
+                if (!(lm instanceof StaggeredGridLayoutManager)) return;
+                StaggeredGridLayoutManager sglm = (StaggeredGridLayoutManager) lm;
                 int total = adapter.getItemCount();
-                int lastVisible = glm.findLastVisibleItemPosition();
+                int[] into = new int[sglm.getSpanCount()];
+                sglm.findLastVisibleItemPositions(into);
+                int lastVisible = -1;
+                for (int v : into) if (v > lastVisible) lastVisible = v;
                 int threshold = 6;
                 if (total > 0 && lastVisible >= total - threshold) {
                     GifSearchView.this.loadNextPage();
@@ -218,9 +223,11 @@ public class GifSearchView extends LinearLayout {
         grid.setFocusable(true);
         grid.setFocusableInTouchMode(true);
         // set up grid and adapter
-        layoutManager = new GridLayoutManager(context, spanCount);
+        layoutManager = new StaggeredGridLayoutManager(spanCount, StaggeredGridLayoutManager.VERTICAL);
+        layoutManager.setGapStrategy(StaggeredGridLayoutManager.GAP_HANDLING_MOVE_ITEMS_BETWEEN_SPANS);
         grid.setLayoutManager(layoutManager);
         adapter = new GifAdapter();
+        adapter.setHasStableIds(true);
         grid.setAdapter(adapter);
         // Add gesture-based single-tap listener for grid items
         final GestureDetector gestureDetector = new GestureDetector(context,
@@ -576,39 +583,13 @@ public class GifSearchView extends LinearLayout {
 
         @Override
         public GifViewHolder onCreateViewHolder(ViewGroup parent, int viewType) {
-            ImageButton iv = new ImageButton(parent.getContext());
-
-            int parentW = ((RecyclerView) parent).getMeasuredWidth();
-            if (parentW <= 0) {
-                parentW = parent.getContext().getResources().getDisplayMetrics().widthPixels;
-            }
-
-            GridLayoutManager lm = (GridLayoutManager) ((RecyclerView) parent).getLayoutManager();
-            int cols = (lm != null ? lm.getSpanCount() : 2);
-            int size = Math.max(1, parentW / Math.max(1, cols));
-
-            RecyclerView.LayoutParams lp = new RecyclerView.LayoutParams(size, size);
-            iv.setLayoutParams(lp);
-
-            iv.setBackgroundResource(android.R.drawable.btn_default);
-            iv.setScaleType(ImageButton.ScaleType.CENTER_CROP);
-            iv.setClickable(true);
-            iv.setFocusable(true);
-            iv.setFocusableInTouchMode(true);
-            return new GifViewHolder(iv);
+            android.view.LayoutInflater inflater = android.view.LayoutInflater.from(parent.getContext());
+            View v = inflater.inflate(R.layout.item_gif_thumbnail, parent, false);
+            return new GifViewHolder(v);
         }
 
         @Override
         public void onBindViewHolder(GifViewHolder holder, int position) {
-            // keep square cells even after span changes
-            holder.image.post(() -> {
-                ViewGroup.LayoutParams lp = holder.image.getLayoutParams();
-                int w = holder.image.getWidth();
-                if (w > 0 && lp.height != w) {
-                    lp.height = w;
-                    holder.image.setLayoutParams(lp);
-                }
-            });
             GifItem item = items.get(position);
             // Clear any previous request
             Glide.with(holder.image).clear(holder.image);
@@ -617,7 +598,8 @@ public class GifSearchView extends LinearLayout {
                  .load(item.getPreviewUrl())
                  .diskCacheStrategy(DiskCacheStrategy.AUTOMATIC)
                  .transition(DrawableTransitionOptions.withCrossFade())
-                 .centerCrop()
+                 .override(com.bumptech.glide.request.target.Target.SIZE_ORIGINAL, com.bumptech.glide.request.target.Target.SIZE_ORIGINAL)
+                 .fitCenter()
                  .into(holder.image);
             holder.image.setOnClickListener(v -> {
                 String fullUrl = item.getFullUrl();
@@ -627,6 +609,13 @@ public class GifSearchView extends LinearLayout {
         }
 
         @Override public int getItemCount() { return items.size(); }
+
+        @Override
+        public long getItemId(int position) {
+            GifItem it = items.get(position);
+            return (it != null && it.id != null) ? it.id.hashCode() : position;
+        }
+
         @Override
         public void onViewRecycled(GifViewHolder holder) {
             Glide.with(holder.image).clear(holder.image);
@@ -634,8 +623,8 @@ public class GifSearchView extends LinearLayout {
         }
 
         class GifViewHolder extends RecyclerView.ViewHolder {
-            final ImageButton image;
-            GifViewHolder(View v) { super(v); image = (ImageButton) v; }
+            final android.widget.ImageView image;
+            GifViewHolder(View v) { super(v); image = v.findViewById(R.id.gif_thumbnail); }
         }
     }
 
