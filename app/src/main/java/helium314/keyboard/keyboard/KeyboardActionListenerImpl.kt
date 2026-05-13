@@ -128,6 +128,9 @@ class KeyboardActionListenerImpl(private val latinIME: LatinIME, private val inp
                     return
                 }
                 KeyCode.EMOJI, KeyCode.ALPHA -> {
+                    if (primaryCode == KeyCode.ALPHA) {
+                        return
+                    }
                     // Exit GIF search, return to emoji palette
                     val rootView = keyboardSwitcher.getWrapperView().rootView
                     val gifView = rootView.findViewById<GifSearchView>(R.id.gif_search_view)
@@ -149,8 +152,13 @@ class KeyboardActionListenerImpl(private val latinIME: LatinIME, private val inp
                     }
                     return
                 }
+                KeyCode.SYMBOL, KeyCode.SYMBOL_ALPHA, KeyCode.NUMPAD, KeyCode.SHIFT, KeyCode.CAPS_LOCK -> {
+                    return
+                }
                 else -> {
-                    latinIME.appendGifSearchChar(primaryCode.toChar())
+                    if (primaryCode > 0 && Character.isValidCodePoint(primaryCode)) {
+                        latinIME.appendGifSearchCodePoint(primaryCode)
+                    }
                     return
                 }
             }
@@ -176,7 +184,13 @@ class KeyboardActionListenerImpl(private val latinIME: LatinIME, private val inp
         latinIME.onEvent(event)
     }
 
-    override fun onTextInput(text: String?) = latinIME.onTextInput(text)
+    override fun onTextInput(text: String?) {
+        if (latinIME.isGifSearchActive()) {
+            latinIME.appendGifSearchText(text)
+            return
+        }
+        latinIME.onTextInput(text)
+    }
 
     override fun onStartBatchInput() = latinIME.onStartBatchInput()
 

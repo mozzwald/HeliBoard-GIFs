@@ -907,14 +907,14 @@ New dictionary:
     <string name="landscape">Landscape</string>
     <!-- Button description to clear GIF search text -->
     <string name="clear_text">Clear text</string>
-    <string name="enable_tenor_search">Enable Tenor GIF search</string>
-    <string name="enter_tenor_api_key">Enter Tenor API key</string>
+    <string name="enable_tenor_search">Enable Klipy GIF search</string>
+    <string name="enter_tenor_api_key">Enter Klipy API key</string>
     <string name="get_tenor_api_key">Get an API key</string>
-    <string name="tenor_warning_no_key">API key required to search GIFs</string>
+    <string name="tenor_warning_no_key">Klipy API key required to search GIFs</string>
     <string name="unable_to_open_link">Cannot open link</string>
-    <string name="settings_screen_gif_tenor">GIF (Tenor)</string>
-    <!-- Header for Tenor GIF settings page -->
-    <string name="tenor_gif_options">Tenor GIF Options</string>
+    <string name="settings_screen_gif_tenor">GIF (Klipy)</string>
+    <!-- Header for Klipy GIF settings page -->
+    <string name="tenor_gif_options">Klipy GIF Options</string>
     <!-- GIF share size preference strings -->
     <string name="gif_share_size">GIF Share Size</string>
     <string name="gif_share_size_auto">Auto (fit MMS)</string>

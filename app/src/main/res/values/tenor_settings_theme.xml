@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- AppCompat DayNight theme for Tenor GIF Settings Activity -->
+    <!-- AppCompat DayNight theme for Klipy GIF Settings Activity -->
     <style name="TenorSettingsTheme" parent="Theme.AppCompat.DayNight.NoActionBar">
         <!-- Override accent color for controls -->
         <item name="colorAccent">@color/accent</item>

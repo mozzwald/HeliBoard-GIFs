@@ -94,7 +94,7 @@ fun MainSettingsScreen(
                     onClick = onClickDictionaries,
                     icon = R.drawable.ic_dictionary
                 ) { NextScreenIcon() }
-                // Tenor GIF settings
+                // Klipy GIF settings
                 Preference(
                     name = stringResource(R.string.settings_screen_gif_tenor),
                     onClick = onClickGifSettings,

@@ -18,7 +18,7 @@ import android.widget.AdapterView;
 import android.view.View;
 
 /**
- * Settings screen for Tenor GIF search.
+ * Settings screen for Klipy GIF search.
  */
 public class TenorSettingsActivity extends AppCompatActivity {
     private SwitchCompat tenorSwitch;
@@ -41,13 +41,13 @@ public class TenorSettingsActivity extends AppCompatActivity {
         shareSizeSpinner = findViewById(R.id.spinner_gif_share_size);
 
         // Load prefs
-        boolean enabled = GifPrefs.isTenorEnabled(ctx);
-        tenorSwitch.setChecked(GifPrefs.isTenorEnabled(ctx));
+        boolean enabled = GifPrefs.isKlipyEnabled(ctx);
+        tenorSwitch.setChecked(enabled);
         String stored = GifPrefs.getStoredApiKey(ctx);
         if (stored != null) apiKeyEdit.setText(stored);
 
         tenorSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
-            GifPrefs.setTenorEnabled(ctx, isChecked);
+            GifPrefs.setKlipyEnabled(ctx, isChecked);
             updateWarning();
         });
         apiKeyEdit.addTextChangedListener(new TextWatcher() {
@@ -62,7 +62,7 @@ public class TenorSettingsActivity extends AppCompatActivity {
         getKeyButton.setOnClickListener(v -> {
             try {
                 Intent i = new Intent(Intent.ACTION_VIEW,
-                    Uri.parse("https://developers.google.com/tenor/guides/quickstart"));
+                    Uri.parse("https://partner.klipy.com/"));
                 i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                 startActivity(i);
             } catch (Exception e) {

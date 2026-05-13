@@ -14,7 +14,6 @@ import android.widget.EditText;
 import android.widget.ImageButton;
 import android.widget.LinearLayout;
 
-import androidx.recyclerview.widget.GridLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 import androidx.recyclerview.widget.StaggeredGridLayoutManager;
 
@@ -135,7 +134,7 @@ public class GifSearchView extends LinearLayout {
         if (queryField == null || queryField.getText() == null) return 0;
         return queryField.getText().length();
     }
-    private int spanCount = 2; // will be recalculated at runtime
+    private static final int GIF_GRID_SPAN_COUNT = 3;
 
     public GifSearchView(Context context, AttributeSet attrs) {
         super(context, attrs);
@@ -146,6 +145,9 @@ public class GifSearchView extends LinearLayout {
         setFocusableInTouchMode(false);
         setDescendantFocusability(FOCUS_AFTER_DESCENDANTS);
         queryField = findViewById(R.id.gif_query_field);
+        queryField.setFocusable(true);
+        queryField.setFocusableInTouchMode(true);
+        queryField.setCursorVisible(true);
         // Notify editing state when query changes
         queryField.addTextChangedListener(new android.text.TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
@@ -203,27 +205,12 @@ public class GifSearchView extends LinearLayout {
                 }
             }
         });
-        // Recompute span count once grid knows its width
-        grid.getViewTreeObserver().addOnGlobalLayoutListener(() -> {
-            int w = grid.getWidth();
-            if (w <= 0) return;
-
-            // desired minimum cell size in dp (tweak 120–140dp to taste)
-            int minCellPx = (int) (getResources().getDisplayMetrics().density * 128);
-
-            int cols = Math.max(2, Math.min(3, w / Math.max(1, minCellPx)));
-            if (cols != spanCount) {
-                spanCount = cols;
-                layoutManager.setSpanCount(spanCount);
-                adapter.notifyDataSetChanged();
-            }
-        });
         // Ensure grid is clickable to intercept taps
         grid.setClickable(true);
         grid.setFocusable(true);
         grid.setFocusableInTouchMode(true);
         // set up grid and adapter
-        layoutManager = new StaggeredGridLayoutManager(spanCount, StaggeredGridLayoutManager.VERTICAL);
+        layoutManager = new StaggeredGridLayoutManager(GIF_GRID_SPAN_COUNT, StaggeredGridLayoutManager.VERTICAL);
         layoutManager.setGapStrategy(StaggeredGridLayoutManager.GAP_HANDLING_MOVE_ITEMS_BETWEEN_SPANS);
         grid.setLayoutManager(layoutManager);
         adapter = new GifAdapter();
@@ -329,21 +316,36 @@ public class GifSearchView extends LinearLayout {
         return grid;
     }
 
-    /** Perform a GIF search using Tenor API. */
+    private void focusQueryField() {
+        if (queryField == null) return;
+        queryField.setCursorVisible(true);
+        queryField.requestFocus();
+        queryField.setSelection(queryField.getText() == null ? 0 : queryField.getText().length());
+    }
+
+    @Override
+    protected void onVisibilityChanged(View changedView, int visibility) {
+        super.onVisibilityChanged(changedView, visibility);
+        if (changedView == this && visibility == View.VISIBLE) {
+            post(this::focusQueryField);
+        }
+    }
+
+    /** Perform a GIF search using Klipy API. */
     public void performSearch(String query) {
         if (query == null || query.isEmpty()) return;
-        // Check Tenor enabled and API key
+        // Check Klipy enabled and API key
         Context ctx = getContext();
-        if (!helium314.keyboard.latin.GifPrefs.isTenorEnabled(ctx)) {
-            Toast.makeText(ctx, "Enable Tenor in Settings to search GIFs", Toast.LENGTH_SHORT).show();
+        if (!helium314.keyboard.latin.GifPrefs.isKlipyEnabled(ctx)) {
+            Toast.makeText(ctx, "Enable Klipy in Settings to search GIFs", Toast.LENGTH_SHORT).show();
             return;
         }
-        String key = GifConfig.getTenorApiKey(ctx);
+        String key = GifConfig.getKlipyApiKey(ctx);
         if (key == null || key.isEmpty()) {
-            Toast.makeText(ctx, "Add your Tenor API key in Settings", Toast.LENGTH_SHORT).show();
+            Toast.makeText(ctx, "Add your Klipy API key in Settings", Toast.LENGTH_SHORT).show();
             return;
         }
-        Log.d(TAG, "Tenor enabled; using API key length=" + key.length());
+        Log.d(TAG, "Klipy enabled; using API key length=" + key.length());
         // Reset pagination state for new search
         currentQuery = query;
         isLoading = false;
@@ -419,37 +421,37 @@ public class GifSearchView extends LinearLayout {
             List<GifItem> list = new ArrayList<>();
             HttpURLConnection conn = null;
             try {
-                // Check Tenor enabled and fetch API key
+                // Check Klipy enabled and fetch API key
                 Context ctx = getContext();
-                if (!helium314.keyboard.latin.GifPrefs.isTenorEnabled(ctx)) {
-                    Log.d(TAG, "Tenor disabled in settings");
+                if (!helium314.keyboard.latin.GifPrefs.isKlipyEnabled(ctx)) {
+                    Log.d(TAG, "Klipy disabled in settings");
                     return list;
                 }
-                String key = GifConfig.getTenorApiKey(ctx);
+                String key = GifConfig.getKlipyApiKey(ctx);
                 if (key == null || key.isEmpty()) {
-                    Log.d(TAG, "No Tenor API key provided");
+                    Log.d(TAG, "No Klipy API key provided");
                     return list;
                 }
                 String encodedKey = URLEncoder.encode(key, StandardCharsets.UTF_8.name());
                 String encodedQ = URLEncoder.encode(q, StandardCharsets.UTF_8.name());
                 StringBuilder sbUrl = new StringBuilder(
-                        "https://tenor.googleapis.com/v2/search?key=" + encodedKey
+                        "https://api.klipy.com/v2/search?key=" + encodedKey
                         + "&q=" + encodedQ
                         + "&limit=25&media_filter=tinygif,mediumgif,gif&client_key=HeliBoard");
                 if (pos != null && !pos.isEmpty()) {
                     sbUrl.append("&pos=").append(URLEncoder.encode(pos, StandardCharsets.UTF_8.name()));
                 }
                 String urlStr = sbUrl.toString();
-                // Log request with masked key
-                //String logUrl = urlStr.replaceAll("key=[^&]*", "key=****");
-                Log.d(TAG, "Tenor API Request: " + urlStr);
+                // Log request with masked key (mask API key value)
+                String logUrl = urlStr.replaceAll("key=[^&]*", "key=****");
+                Log.d(TAG, "Klipy API Request: " + logUrl);
                 conn = (HttpURLConnection) new URL(urlStr).openConnection();
                 conn.setRequestMethod("GET");
                 conn.setConnectTimeout(10000);
                 conn.setReadTimeout(15000);
                 conn.connect();
                 int status = conn.getResponseCode();
-                Log.d(TAG, "Tenor API HTTP status: " + status);
+                Log.d(TAG, "Klipy API HTTP status: " + status);
                 InputStream in = new BufferedInputStream(conn.getInputStream());
                 BufferedReader reader = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8));
                 StringBuilder sb = new StringBuilder();
@@ -847,7 +849,7 @@ public class GifSearchView extends LinearLayout {
                     mimeType = "image/gif";
                     displayExt = ".gif";
                 }
-                File dir = new File(getContext().getCacheDir(), "tenor_gifs");
+                File dir = new File(getContext().getCacheDir(), "klipy_gifs");
                 if (!dir.exists() && !dir.mkdirs()) {
                     Log.e(TAG, "Failed to create cache directory: " + dir.getAbsolutePath());
                 }
@@ -923,7 +925,7 @@ public class GifSearchView extends LinearLayout {
             }
 
             final String authority = getContext().getPackageName() + ".fileprovider";
-            final File gifFile = new File(getContext().getCacheDir(), "tenor_gifs/" + item.id + ".gif");
+            final File gifFile = new File(getContext().getCacheDir(), "klipy_gifs/" + item.id + ".gif");
 
             // If the editor does not declare any rich content MIME types, skip commit and SHARE directly
             if (noRichContent) {
@@ -1074,7 +1076,7 @@ public class GifSearchView extends LinearLayout {
             Canvas c = new Canvas(bmp);
             mv.setTime(0);
             mv.draw(c, 0, 0);
-            File outDir = new File(getContext().getCacheDir(), "tenor_gifs_png");
+            File outDir = new File(getContext().getCacheDir(), "klipy_gifs_png");
             if (!outDir.exists() && !outDir.mkdirs()) {
                 Log.e(TAG, "Failed to create cache directory for PNG: " + outDir.getAbsolutePath());
                 return null;
@@ -1140,16 +1142,30 @@ public class GifSearchView extends LinearLayout {
 } // end DownloadAndSendTask
 
     // Programmatic query editing for GIF search
+    public void appendQueryCodePoint(int codePoint) {
+        if (!Character.isValidCodePoint(codePoint)) return;
+        focusQueryField();
+        queryField.append(new String(Character.toChars(codePoint)));
+    }
+
+    public void appendQueryText(String text) {
+        if (text == null || text.isEmpty()) return;
+        focusQueryField();
+        queryField.append(text);
+    }
+
     public void appendQueryChar(char c) {
-        queryField.append(Character.toString(c));
+        appendQueryCodePoint(c);
     }
 
     public void deleteLastChar() {
         String s = queryField.getText().toString();
         if (!s.isEmpty()) {
-            String newText = s.substring(0, s.length() - 1);
+            int deleteFrom = s.offsetByCodePoints(s.length(), -1);
+            String newText = s.substring(0, deleteFrom);
             queryField.setText(newText);
             queryField.setSelection(newText.length());
+            focusQueryField();
         }
     }
     /** Never intercept; let children handle touches first, but log intercept events */

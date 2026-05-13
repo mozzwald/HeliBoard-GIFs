@@ -7,7 +7,8 @@ plugins {
     kotlin("plugin.compose") version "2.0.0"
 }
 
-// TENOR API key: retrieve from project root local.properties (key=TENOR_API_KEY)
+// KLIPY API key: retrieve from project root local.properties (key=KLIPY_API_KEY).
+// Fall back to TENOR_API_KEY so existing local.properties files keep building.
 val localPropsFile = rootProject.file("local.properties")
 val localProps = Properties()
 if (localPropsFile.exists()) {
@@ -16,7 +17,10 @@ if (localPropsFile.exists()) {
     }
 }
 // Provide empty string if key is missing
-val tenorKey: String = localProps.getProperty("TENOR_API_KEY", "")
+val klipyKey: String = localProps.getProperty(
+    "KLIPY_API_KEY",
+    localProps.getProperty("TENOR_API_KEY", "")
+)
 
 android {
     compileSdk = 35
@@ -32,7 +36,8 @@ android {
             abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64"))
         }
         proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-        buildConfigField("String", "TENOR_API_KEY", "\"$tenorKey\"")
+        buildConfigField("String", "KLIPY_API_KEY", "\"$klipyKey\"")
+        buildConfigField("String", "TENOR_API_KEY", "\"$klipyKey\"")
     }
 
     buildTypes {

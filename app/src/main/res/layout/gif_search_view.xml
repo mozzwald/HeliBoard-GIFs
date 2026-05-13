@@ -22,8 +22,9 @@
             android:hint="Search GIFs"
             android:inputType="text"
             android:imeOptions="actionSearch"
-            android:focusable="false"
-            android:cursorVisible="false"
+            android:focusable="true"
+            android:focusableInTouchMode="true"
+            android:cursorVisible="true"
             android:textColor="@color/gif_search_text"
             android:textColorHint="@color/gif_search_hint" />
         <!-- Clear text button -->

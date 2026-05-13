@@ -2093,12 +2093,30 @@ public class LatinIME extends InputMethodService implements
     /**
      * Appends a character to the GIF search query field.
      */
-    public void appendGifSearchChar(char c) {
+    public void appendGifSearchCodePoint(int codePoint) {
         if (mInputView == null) return;
         View v = mInputView.findViewById(R.id.gif_search_view);
         if (v instanceof GifSearchView) {
-            ((GifSearchView) v).appendQueryChar(c);
+            ((GifSearchView) v).appendQueryCodePoint(codePoint);
         }
+    }
+
+    /**
+     * Appends text to the GIF search query field.
+     */
+    public void appendGifSearchText(String text) {
+        if (mInputView == null) return;
+        View v = mInputView.findViewById(R.id.gif_search_view);
+        if (v instanceof GifSearchView) {
+            ((GifSearchView) v).appendQueryText(text);
+        }
+    }
+
+    /**
+     * Appends a character to the GIF search query field.
+     */
+    public void appendGifSearchChar(char c) {
+        appendGifSearchCodePoint(c);
     }
 
     /**

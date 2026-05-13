@@ -278,9 +278,9 @@ public final class EmojiPalettesView extends LinearLayout
             mTabStrip.addView(mGifTab);
             mGifTab.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f));
             mGifTab.setOnClickListener(this);
-            // Initial visibility based on Tenor settings
+            // Initial visibility based on Klipy settings
             String apiKey = helium314.keyboard.latin.GifPrefs.getStoredApiKey(ctx);
-            boolean showGif = helium314.keyboard.latin.GifPrefs.isTenorEnabled(ctx)
+            boolean showGif = helium314.keyboard.latin.GifPrefs.isKlipyEnabled(ctx)
                     && apiKey != null && !apiKey.trim().isEmpty();
             mGifTab.setVisibility(showGif ? View.VISIBLE : View.GONE);
         }
@@ -409,7 +409,7 @@ public final class EmojiPalettesView extends LinearLayout
         if (mGifTab != null) {
             android.content.Context ctx = getContext();
             String apiKey = helium314.keyboard.latin.GifPrefs.getStoredApiKey(ctx);
-            boolean showGif = helium314.keyboard.latin.GifPrefs.isTenorEnabled(ctx)
+            boolean showGif = helium314.keyboard.latin.GifPrefs.isKlipyEnabled(ctx)
                     && apiKey != null && !apiKey.trim().isEmpty();
             mGifTab.setVisibility(showGif ? View.VISIBLE : View.GONE);
         }
